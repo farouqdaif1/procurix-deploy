@@ -1,5 +1,5 @@
 import type { SessionStage } from '@/app/types';
-import { Upload, Zap, FileText, Box, CheckCircle, Search, History, Layers, Filter, Sparkles, ClipboardCheck } from 'lucide-react';
+import { Upload, Zap, FileText, Box, CheckCircle, Layers, Filter, Sparkles, ClipboardCheck } from 'lucide-react';
 
 interface StageIndicatorProps {
   currentStage: SessionStage;

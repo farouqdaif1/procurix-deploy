@@ -1,10 +1,9 @@
-import { useMemo, useCallback, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
 import { 
   ReactFlow, 
   Background, 
   Controls, 
   MiniMap,
-  Panel,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -20,8 +19,6 @@ import type { Subsystem, Component } from '@/app/types';
 import { ComponentNode } from '../../architecture/components/ComponentNode';
 import { SubsystemGroupNode } from '../../subsystems/components/SubsystemGroupNode';
 import { ZoomControls, type ZoomLevel } from './ZoomControls';
-import { CheckCircle } from 'lucide-react';
-import { Button } from '@/app/shared/components/ui/button';
 
 interface ComplianceFlowViewProps {
   subsystems: Subsystem[];
@@ -31,24 +28,6 @@ interface ComplianceFlowViewProps {
   onComponentExplore?: (componentId: string) => void;
 }
 
-// Helper function to extract pin number from pin name and create handle ID
-const extractHandleId = (pinName?: string): string | undefined => {
-  if (!pinName) return undefined;
-  
-  // Try to extract pin number from patterns like "Pin 1", "Pin 7", "(Pin 1)", etc.
-  const pinMatch = pinName.match(/[Pp]in\s*(\d+)/i);
-  if (pinMatch) {
-    return `pin-${pinMatch[1]}`;
-  }
-  
-  // If it's just a number, use it directly
-  const numberMatch = pinName.match(/^(\d+)$/);
-  if (numberMatch) {
-    return `pin-${numberMatch[1]}`;
-  }
-  
-  return undefined;
-};
 
 const nodeTypes = {
   component: ComponentNode as any,
@@ -59,8 +38,7 @@ export function ComplianceFlowView({
   subsystems, 
   components, 
   selectedComponentId,
-  onComponentSelect,
-  onComponentExplore 
+  onComponentSelect
 }: ComplianceFlowViewProps) {
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('component');
   
@@ -285,7 +263,7 @@ export function ComplianceFlowView({
           e.targetHandle === params.targetHandle
         );
         if (exists) return eds;
-        return addEdge(newEdge, eds);
+        return addEdge(newEdge as any, eds as any);
       });
     },
     [setEdges]
@@ -403,8 +381,8 @@ function ComplianceFlowContent({
       <ZoomControls
         currentZoom={currentZoom / 100}
         zoomLevel={zoomLevel}
-        onZoomIn={() => zoomIn(0.2)}
-        onZoomOut={() => zoomOut(0.2)}
+        onZoomIn={() => zoomIn()}
+        onZoomOut={() => zoomOut()}
         onResetZoom={() => fitView()}
         onZoomLevelChange={onZoomLevelChange}
       />

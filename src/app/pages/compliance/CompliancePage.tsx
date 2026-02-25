@@ -7,8 +7,6 @@ import { CheckCircle } from 'lucide-react';
 
 export function CompliancePage() {
   const [selectedComponentId, setSelectedComponentId] = useState<string | undefined>();
-
-  const complianceScore = mockSession.complianceScore || 0;
   const totalComponents = mockSession.totalComponents || 0;
   const compliantComponents = mockSession.compliantComponents || 0;
 

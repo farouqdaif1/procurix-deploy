@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { BOMSession } from '@/app/types';
-import { Upload, FileText, CheckCircle2, AlertTriangle, Clock, Search, Filter, Plus, ChevronRight, Cpu, TrendingUp, Package } from 'lucide-react';
+import { FileText, CheckCircle2, AlertTriangle, Clock, Search, Plus, ChevronRight, Cpu, Package } from 'lucide-react';
 import { Button } from '@/app/shared/components/ui/button';
 import { Input } from '@/app/shared/components/ui/input';
 import { Badge } from '@/app/shared/components/ui/badge';
@@ -15,7 +15,9 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'complete' | 'in-progress'>('all');
 
-  const getStageLabel = (stage: string) => {
+  // Unused helper functions kept for potential future use
+  // @ts-expect-error - unused but kept for future use
+  const getStageLabel = (_stage: string) => {
     const labels: Record<string, string> = {
       upload: 'Upload',
       discovery: 'Discovery',
@@ -26,12 +28,13 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
       subsystems: 'Subsystems',
       compliance: 'Compliance Analysis',
     };
-    return labels[stage] || stage;
+    return labels[_stage] || _stage;
   };
 
-  const getStageProgress = (stage: string) => {
+  // @ts-expect-error - unused but kept for future use
+  const getStageProgress = (_stage: string) => {
     const stages = ['upload', 'discovery', 'identify', 'fundamental', 'architecture', 'requirements', 'subsystems', 'compliance'];
-    const currentIndex = stages.indexOf(stage);
+    const currentIndex = stages.indexOf(_stage);
     return ((currentIndex + 1) / stages.length) * 100;
   };
 
@@ -181,8 +184,6 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
           ) : (
             <div className="grid gap-4">
               {filteredSessions.filter(session => isComplete(session)).map((session) => {
-                const complete = isComplete(session);
-                const progress = getStageProgress(session.stage);
                 
                 return (
                   <button

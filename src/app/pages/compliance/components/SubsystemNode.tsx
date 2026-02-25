@@ -1,6 +1,6 @@
 import type { Subsystem, Component } from '@/app/types';
 import { motion } from 'motion/react';
-import { Box, Cpu } from 'lucide-react';
+import { Cpu } from 'lucide-react';
 
 interface SubsystemNodeProps {
   subsystem: Subsystem;

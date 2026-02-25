@@ -1,6 +1,5 @@
 import type { BOMSession, SessionStage } from '@/app/types';
 import { 
-  Upload, 
   Search, 
   Fingerprint, 
   Layers, 
@@ -10,10 +9,7 @@ import {
   CheckCircle2,
   ChevronRight,
   AlertCircle,
-  BarChart3,
   Cpu,
-  TrendingUp,
-  FileText,
   Shield,
   MessageCircle,
   X,
@@ -212,7 +208,7 @@ Try asking questions like "What's my compliance score?" or "Tell me about my com
       status: 'complete',
     },
     {
-      id: 'identify',
+      id: 'discovery',
       title: 'Component Identification',
       description: 'Verified part numbers and manufacturer details',
       icon: Fingerprint,

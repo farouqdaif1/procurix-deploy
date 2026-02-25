@@ -24,7 +24,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
   const { sessionId } = useSession();
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [isGenerating, setIsGenerating] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('All');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);

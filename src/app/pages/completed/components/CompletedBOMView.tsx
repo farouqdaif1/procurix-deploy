@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import type { BOMSession, Component, Subsystem, Alternative } from '@/app/types';
+import { useState } from 'react';
+import type { BOMSession, Subsystem } from '@/app/types';
 import { mockAlternatives } from '@/app/data/mockData';
 import { 
   Home,
@@ -8,16 +8,11 @@ import {
   Box,
   MessageSquare,
   Send,
-  Sparkles,
   Package,
   CheckCircle2,
   XCircle,
-  AlertCircle,
-  Cpu,
-  Filter,
   ChevronDown,
   ChevronUp,
-  TrendingUp,
   Activity,
   Info,
   ArrowLeft,
@@ -127,7 +122,8 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
     }
 
     if (lowerInput.includes('compliance') || lowerInput.includes('fail')) {
-      return `**Compliance Status Overview:**\n\n${session.complianceScore >= 70 ? '✅' : '⚠️'} **Overall Score:** ${session.complianceScore}%\n\n✅ **Compliant:** ${compliantComponents.length} components\n${compliantComponents.slice(0, 3).map(c => `• ${c.reference}`).join('\n')}\n\n${failedComponents.length > 0 ? `❌ **Failed:** ${failedComponents.length} components\n${failedComponents.slice(0, 3).map(c => `• ${c.reference}`).join('\n')}\n\nThese components may need alternative parts or requirement adjustments.` : '✅ All components are compliant!'}`;
+      const score = session.complianceScore ?? 0;
+      return `**Compliance Status Overview:**\n\n${score >= 70 ? '✅' : '⚠️'} **Overall Score:** ${score}%\n\n✅ **Compliant:** ${compliantComponents.length} components\n${compliantComponents.slice(0, 3).map(c => `• ${c.reference}`).join('\n')}\n\n${failedComponents.length > 0 ? `❌ **Failed:** ${failedComponents.length} components\n${failedComponents.slice(0, 3).map(c => `• ${c.reference}`).join('\n')}\n\nThese components may need alternative parts or requirement adjustments.` : '✅ All components are compliant!'}`;
     }
 
     if (lowerInput.includes('subsystem') || lowerInput.includes('breakdown')) {
@@ -142,7 +138,8 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
     }
 
     if (lowerInput.includes('recommend') || lowerInput.includes('improve') || lowerInput.includes('optimize')) {
-      return `**Optimization Recommendations:**\n\n${session.complianceScore < 70 ? '⚠️ **Priority: Improve Compliance**\n• Focus on the ' + failedComponents.length + ' failed components\n• Consider alternative parts or design adjustments\n\n' : ''}💡 **Suggestions:**\n• Review auxiliary component consolidation opportunities\n• Ensure all fundamental components have approved alternatives\n• Document compliance rationale for critical components\n• Consider standardizing component families\n\nWould you like detailed analysis on any specific area?`;
+      const score = session.complianceScore ?? 0;
+      return `**Optimization Recommendations:**\n\n${score < 70 ? '⚠️ **Priority: Improve Compliance**\n• Focus on the ' + failedComponents.length + ' failed components\n• Consider alternative parts or design adjustments\n\n' : ''}💡 **Suggestions:**\n• Review auxiliary component consolidation opportunities\n• Ensure all fundamental components have approved alternatives\n• Document compliance rationale for critical components\n• Consider standardizing component families\n\nWould you like detailed analysis on any specific area?`;
     }
 
     // Default response
@@ -225,9 +222,9 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
             <div className="flex items-center justify-between text-xs">
               <span className="text-gray-600">Compliance</span>
               <span className={`font-semibold ${
-                session.complianceScore >= 70 ? 'text-green-600' : 'text-yellow-600'
+                (session.complianceScore ?? 0) >= 70 ? 'text-green-600' : 'text-yellow-600'
               }`}>
-                {session.complianceScore}%
+                {session.complianceScore ?? 0}%
               </span>
             </div>
             <div className="flex items-center justify-between text-xs">
@@ -348,31 +345,45 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
                         className="overflow-hidden"
                       >
                         <div className="grid grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-2">
-                          {session.requirements.map(req => (
-                            <div key={req.id} className="rounded-lg bg-purple-50 border border-purple-200 p-4">
-                              <div className="flex items-start justify-between mb-2">
-                                <h4 className="font-semibold text-gray-900 text-sm">{req.name}</h4>
-                                <Badge className={
-                                  req.criticality === 'critical'
-                                    ? 'bg-red-100 text-red-700 text-xs'
-                                    : req.criticality === 'important'
-                                    ? 'bg-yellow-100 text-yellow-700 text-xs'
-                                    : 'bg-blue-100 text-blue-700 text-xs'
-                                }>
-                                  {req.criticality}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-gray-700 mb-2">{req.description}</p>
-                              <div className="flex items-center justify-between text-xs">
-                                <div className="text-gray-600">
-                                  <span className="font-semibold">Target:</span> {req.value} {req.unit}
+                          {session.requirements.map(req => {
+                            const affectedSubsystem = req.affectedComponents.length > 0 
+                              ? session.components.find(c => c.id === req.affectedComponents[0])?.subsystemId
+                              : undefined;
+                            const subsystemName = affectedSubsystem 
+                              ? session.subsystems.find(s => s.id === affectedSubsystem)?.name 
+                              : 'System-wide';
+                            
+                            return (
+                              <div key={req.id} className="rounded-lg bg-purple-50 border border-purple-200 p-4">
+                                <div className="flex items-start justify-between mb-2">
+                                  <h4 className="font-semibold text-gray-900 text-sm">{req.title}</h4>
+                                  <Badge className={
+                                    req.priority === 'critical' || req.priority === 'mandatory'
+                                      ? 'bg-red-100 text-red-700 text-xs'
+                                      : req.priority === 'high'
+                                      ? 'bg-yellow-100 text-yellow-700 text-xs'
+                                      : 'bg-blue-100 text-blue-700 text-xs'
+                                  }>
+                                    {req.priority}
+                                  </Badge>
                                 </div>
-                                <div className="text-gray-500">
-                                  {session.subsystems.find(s => s.id === req.subsystemId)?.name || 'System-wide'}
+                                <p className="text-xs text-gray-700 mb-2">{req.description}</p>
+                                <div className="flex items-center justify-between text-xs">
+                                  <div className="text-gray-600">
+                                    <span className="font-semibold">Code:</span> {req.code}
+                                    {req.threshold !== undefined && (
+                                      <span className="ml-2">
+                                        <span className="font-semibold">Threshold:</span> {req.threshold}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-gray-500">
+                                    {subsystemName}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </motion.div>
                     ) : (
@@ -382,31 +393,45 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
                         className="overflow-hidden"
                       >
                         <div className="grid grid-cols-2 gap-3">
-                          {session.requirements.slice(0, 4).map(req => (
-                            <div key={req.id} className="rounded-lg bg-purple-50 border border-purple-200 p-4">
-                              <div className="flex items-start justify-between mb-2">
-                                <h4 className="font-semibold text-gray-900 text-sm">{req.name}</h4>
-                                <Badge className={
-                                  req.criticality === 'critical'
-                                    ? 'bg-red-100 text-red-700 text-xs'
-                                    : req.criticality === 'important'
-                                    ? 'bg-yellow-100 text-yellow-700 text-xs'
-                                    : 'bg-blue-100 text-blue-700 text-xs'
-                                }>
-                                  {req.criticality}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-gray-700 mb-2">{req.description}</p>
-                              <div className="flex items-center justify-between text-xs">
-                                <div className="text-gray-600">
-                                  <span className="font-semibold">Target:</span> {req.value} {req.unit}
+                          {session.requirements.slice(0, 4).map(req => {
+                            const affectedSubsystem = req.affectedComponents.length > 0 
+                              ? session.components.find(c => c.id === req.affectedComponents[0])?.subsystemId
+                              : undefined;
+                            const subsystemName = affectedSubsystem 
+                              ? session.subsystems.find(s => s.id === affectedSubsystem)?.name 
+                              : 'System-wide';
+                            
+                            return (
+                              <div key={req.id} className="rounded-lg bg-purple-50 border border-purple-200 p-4">
+                                <div className="flex items-start justify-between mb-2">
+                                  <h4 className="font-semibold text-gray-900 text-sm">{req.title}</h4>
+                                  <Badge className={
+                                    req.priority === 'critical' || req.priority === 'mandatory'
+                                      ? 'bg-red-100 text-red-700 text-xs'
+                                      : req.priority === 'high'
+                                      ? 'bg-yellow-100 text-yellow-700 text-xs'
+                                      : 'bg-blue-100 text-blue-700 text-xs'
+                                  }>
+                                    {req.priority}
+                                  </Badge>
                                 </div>
-                                <div className="text-gray-500">
-                                  {session.subsystems.find(s => s.id === req.subsystemId)?.name || 'System-wide'}
+                                <p className="text-xs text-gray-700 mb-2">{req.description}</p>
+                                <div className="flex items-center justify-between text-xs">
+                                  <div className="text-gray-600">
+                                    <span className="font-semibold">Code:</span> {req.code}
+                                    {req.threshold !== undefined && (
+                                      <span className="ml-2">
+                                        <span className="font-semibold">Threshold:</span> {req.threshold}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-gray-500">
+                                    {subsystemName}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                         {session.requirements.length > 4 && (
                           <div className="mt-3 text-center">
@@ -521,10 +546,6 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
                                         </span>
                                       </div>
                                     )}
-                                    <div>
-                                      <span className="text-gray-600">Value:</span>
-                                      <span className="ml-2 font-semibold text-gray-900">{comp.value || 'N/A'}</span>
-                                    </div>
                                   </div>
                                   {comp.description && (
                                     <div className="text-xs text-gray-700 bg-white rounded p-2">
@@ -743,28 +764,44 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
                     </h3>
                     <div className="space-y-2">
                       {session.requirements
-                        .filter(req => req.subsystemId === selectedSubsystem.id)
+                        .filter(req => {
+                          // Check if requirement affects components in this subsystem
+                          const subsystemComponentIds = session.components
+                            .filter(c => c.subsystemId === selectedSubsystem.id)
+                            .map(c => c.id);
+                          return req.affectedComponents.some(id => subsystemComponentIds.includes(id));
+                        })
                         .map(req => (
                           <div key={req.id} className="rounded-lg bg-cyan-50 border border-cyan-200 p-4">
                             <div className="flex items-start justify-between mb-2">
-                              <h4 className="font-semibold text-gray-900">{req.name}</h4>
+                              <h4 className="font-semibold text-gray-900">{req.title}</h4>
                               <Badge className={
-                                req.criticality === 'critical'
+                                req.priority === 'critical' || req.priority === 'mandatory'
                                   ? 'bg-red-100 text-red-700'
-                                  : req.criticality === 'important'
+                                  : req.priority === 'high'
                                   ? 'bg-yellow-100 text-yellow-700'
                                   : 'bg-blue-100 text-blue-700'
                               }>
-                                {req.criticality}
+                                {req.priority}
                               </Badge>
                             </div>
                             <p className="text-sm text-gray-700 mb-2">{req.description}</p>
                             <div className="text-xs text-gray-600">
-                              <span className="font-semibold">Value:</span> {req.value} {req.unit}
+                              <span className="font-semibold">Code:</span> {req.code}
+                              {req.threshold !== undefined && (
+                                <span className="ml-2">
+                                  <span className="font-semibold">Threshold:</span> {req.threshold}
+                                </span>
+                              )}
                             </div>
                           </div>
                         ))}
-                      {session.requirements.filter(req => req.subsystemId === selectedSubsystem.id).length === 0 && (
+                      {session.requirements.filter(req => {
+                        const subsystemComponentIds = session.components
+                          .filter(c => c.subsystemId === selectedSubsystem.id)
+                          .map(c => c.id);
+                        return req.affectedComponents.some(id => subsystemComponentIds.includes(id));
+                      }).length === 0 && (
                         <div className="text-sm text-gray-500 italic">No requirements defined for this subsystem</div>
                       )}
                     </div>
@@ -910,7 +947,7 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
                                                   </div>
                                                   <div>
                                                     <span className="text-gray-600">Cost:</span>
-                                                    <span className="ml-2 font-semibold text-gray-900">${alt.cost.toFixed(2)}</span>
+                                                    <span className="ml-2 font-semibold text-gray-900">${alt.cost?.toFixed(2) ?? 'N/A'}</span>
                                                   </div>
                                                   {alt.impact.isDropInReplacement && (
                                                     <Badge className="bg-purple-100 text-purple-700 text-xs">
@@ -1031,8 +1068,8 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
                   <h1 className="text-4xl font-bold text-gray-900 mb-2">Compliance Analysis</h1>
                   <p className="text-lg text-gray-600">
                     Overall score: <span className={`font-bold ${
-                      session.complianceScore >= 70 ? 'text-green-600' : 'text-yellow-600'
-                    }`}>{session.complianceScore}%</span>
+                      (session.complianceScore ?? 0) >= 70 ? 'text-green-600' : 'text-yellow-600'
+                    }`}>{session.complianceScore ?? 0}%</span>
                   </p>
                 </div>
 

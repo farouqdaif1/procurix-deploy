@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { BOMSession, Component, Requirement, Subsystem } from '@/app/types';
+import type { BOMSession } from '@/app/types';
 import { 
   Upload, 
   Sparkles, 

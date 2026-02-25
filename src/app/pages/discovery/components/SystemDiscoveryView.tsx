@@ -15,7 +15,6 @@ import {
   Package,
   ShieldAlert,
   MessageSquare,
-  Upload,
   FileText,
   Send,
   Paperclip,
@@ -82,7 +81,6 @@ const detectSystemTypes = (components: Component[]): SystemTypeOption[] => {
   const hasMCU = types.some(t => t.includes('mcu') || t.includes('processor'));
   const hasRegulators = types.some(t => t.includes('regulator') || t.includes('ldo'));
   const hasCapacitors = types.some(t => t.includes('capacitor'));
-  const hasResistors = types.some(t => t.includes('resistor'));
   
   const options: SystemTypeOption[] = [];
   

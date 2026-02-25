@@ -16,8 +16,6 @@ import {
   List,
   Layers,
   Search,
-  TrendingDown,
-  ArrowLeftRight,
   X,
   Edit2,
   Check,
@@ -41,12 +39,14 @@ interface SubsystemsViewProps {
   onAddRequirements: (newRequirements: Requirement[]) => void;
 }
 
+type SubsystemRequirementPriority = 'critical' | 'high' | 'mandatory' | 'medium' | 'low';
+
 interface SubsystemRequirement {
   id: string;
   subsystemId: string;
   title: string;
   description: string;
-  priority: 'critical' | 'high' | 'mandatory' | 'medium' | 'low';
+  priority: SubsystemRequirementPriority;
   category: string;
 }
 
@@ -67,10 +67,15 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
   const [requirementSearchQuery, setRequirementSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const [editingRequirementId, setEditingRequirementId] = useState<string | null>(null);
-  const [editRequirement, setEditRequirement] = useState({
+  const [editRequirement, setEditRequirement] = useState<{
+    title: string;
+    description: string;
+    priority: SubsystemRequirementPriority;
+    category: string;
+  }>({
     title: '',
     description: '',
-    priority: 'medium' as const,
+    priority: 'medium',
     category: '',
   });
   const [isEditingSpecs, setIsEditingSpecs] = useState(false);
@@ -135,7 +140,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     setEditRequirement({
       title: req.title,
       description: req.description,
-      priority: req.priority,
+      priority: (req.priority === 'critical' || req.priority === 'mandatory' || req.priority === 'high' || req.priority === 'low' ? req.priority : 'medium') as SubsystemRequirementPriority,
       category: req.category,
     });
   };
@@ -181,8 +186,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     setIsEditingSpecs(true);
     setEditedSpecs({
       ...component.specs,
-      value: component.value,
-      price: component.price,
       manufacturer: component.manufacturer,
       partNumber: component.partNumber,
       description: component.description,
@@ -205,8 +208,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 current: editedSpecs.current,
                 power: editedSpecs.power,
               },
-              value: editedSpecs.value,
-              price: editedSpecs.price,
               manufacturer: editedSpecs.manufacturer,
               partNumber: editedSpecs.partNumber,
               description: editedSpecs.description,
@@ -250,10 +251,9 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     }
   };
 
-  // Generate mock alternative components
+  // Generate mock alternative components (unused but kept for future use)
+  // @ts-expect-error - unused but kept for future use
   const generateAlternatives = (component: Component): Component[] => {
-    const basePrice = Math.random() * 50 + 10; // $10-60
-    
     return [
       {
         ...component,
@@ -261,10 +261,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
         partNumber: `${component.partNumber}-LC`, // Lower Cost variant
         manufacturer: component.manufacturer,
         description: `Cost-optimized alternative - ${component.description || 'Similar specs with economy package'}`,
-        value: component.value,
-        category: component.category,
-        complianceStatus: Math.random() > 0.3 ? 'compliant' : 'pending',
-        price: basePrice * 0.6, // 40% cheaper
+        complianceStatus: Math.random() > 0.3 ? 'compliant' : 'unknown',
         specs: {
           ...component.specs,
           tolerance: '±5%', // Slightly worse tolerance
@@ -278,10 +275,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
         partNumber: `${component.partNumber}-HP`, // High Performance variant
         manufacturer: component.manufacturer,
         description: `High-performance alternative - ${component.description || 'Enhanced specs and reliability'}`,
-        value: component.value,
-        category: component.category,
         complianceStatus: 'compliant',
-        price: basePrice * 1.4, // 40% more expensive
         specs: {
           ...component.specs,
           tolerance: '±1%', // Better tolerance
@@ -295,10 +289,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
         partNumber: `${component.partNumber?.replace(/\d+$/, (match) => String(Number(match) + 1))}`, // Different model number
         manufacturer: ['Texas Instruments', 'Analog Devices', 'STMicroelectronics', 'Infineon'][Math.floor(Math.random() * 4)], // Different manufacturer
         description: `Cross-manufacturer alternative - ${component.description || 'Compatible drop-in replacement'}`,
-        value: component.value,
-        category: component.category,
-        complianceStatus: Math.random() > 0.5 ? 'compliant' : 'pending',
-        price: basePrice * 0.85, // 15% cheaper
+        complianceStatus: Math.random() > 0.5 ? 'compliant' : 'unknown',
         specs: {
           ...component.specs,
           tolerance: '±2%',
@@ -307,16 +298,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
         }
       }
     ];
-  };
-
-  const handleReplaceComponent = (oldComp: Component, newComp: Component) => {
-    setClassifiedComponents(prev => 
-      prev.map(c => c.id === oldComp.id ? { ...newComp, id: oldComp.id, subsystemId: oldComp.subsystemId } : c)
-    );
-    setSelectedComponent(null);
-    toast.success(`Replaced ${oldComp.reference} with ${newComp.partNumber}`, {
-      description: `New cost: $${newComp.price?.toFixed(2)} (was $${oldComp.price?.toFixed(2)})`
-    });
   };
 
   const totalRequirementsCount = Object.values(subsystemRequirements).reduce(
@@ -425,16 +406,19 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                     let reqCounter = 1;
                     
                     // Helper function to add both requirement types simultaneously
-                    const addReq = (title: string, desc: string, type: string, priority: 'high' | 'medium', category: string) => {
+                    const addReq = (title: string, desc: string, validationType: string, priority: 'high' | 'medium' | 'critical' | 'mandatory' | 'low', category: string) => {
                       const id = `req-${Date.now()}-${reqCounter++}`;
+                      const code = `REQ-${category.toUpperCase().substring(0, 3)}-${String(newRequirements.length + 1).padStart(3, '0')}`;
                       newRequirements.push({
                         id,
+                        code,
                         title,
                         description: desc,
-                        type,
+                        validationType: validationType as 'threshold' | 'boolean' | 'range' | 'enum',
                         isPassed: true,
-                        priority,
-                        subsystemId: selectedSubsystem.id
+                        priority: priority as 'critical' | 'high' | 'mandatory' | 'medium' | 'low',
+                        category,
+                        affectedComponents: subsystemComps.map(c => c.id)
                       });
                       newSubsystemRequirements.push({
                         id,
@@ -448,44 +432,44 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                     
                     // Deep component analysis with expanded detection patterns
                     const hasPowerComponents = subsystemComps.some(c => 
-                      c.category?.toLowerCase().includes('power') || 
-                      c.category?.toLowerCase().includes('regulator') ||
-                      c.category?.toLowerCase().includes('converter') ||
+                      c.type?.toLowerCase().includes('power') || 
+                      c.type?.toLowerCase().includes('regulator') ||
+                      c.type?.toLowerCase().includes('converter') ||
                       c.reference?.toLowerCase().includes('power') ||
                       c.partNumber?.toLowerCase().includes('ldo')
                     );
                     
                     const hasProcessingComponents = subsystemComps.some(c => 
-                      c.category?.toLowerCase().includes('processor') || 
-                      c.category?.toLowerCase().includes('mcu') ||
+                      c.type?.toLowerCase().includes('processor') || 
+                      c.type?.toLowerCase().includes('mcu') ||
                       c.reference?.toLowerCase().includes('cpu') ||
                       c.partNumber?.toLowerCase().includes('stm32')
                     );
                     
                     const hasCommunicationComponents = subsystemComps.some(c => 
-                      c.category?.toLowerCase().includes('communication') || 
+                      c.type?.toLowerCase().includes('communication') || 
                       c.reference?.toLowerCase().includes('uart') ||
                       c.reference?.toLowerCase().includes('usb') ||
                       c.reference?.toLowerCase().includes('can')
                     );
                     
                     const hasSensorComponents = subsystemComps.some(c => 
-                      c.category?.toLowerCase().includes('sensor') || 
+                      c.type?.toLowerCase().includes('sensor') || 
                       c.reference?.toLowerCase().includes('sensor')
                     );
                     
                     const hasMemoryComponents = subsystemComps.some(c => 
-                      c.category?.toLowerCase().includes('memory') || 
-                      c.category?.toLowerCase().includes('flash')
+                      c.type?.toLowerCase().includes('memory') || 
+                      c.type?.toLowerCase().includes('flash')
                     );
                     
                     const hasDisplayComponents = subsystemComps.some(c => 
-                      c.category?.toLowerCase().includes('display') || 
-                      c.category?.toLowerCase().includes('lcd')
+                      c.type?.toLowerCase().includes('display') || 
+                      c.type?.toLowerCase().includes('lcd')
                     );
                     
                     const hasConnectorComponents = subsystemComps.some(c => 
-                      c.category?.toLowerCase().includes('connector')
+                      c.type?.toLowerCase().includes('connector')
                     );
                     
                     // Power requirements
@@ -1012,7 +996,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                     </div>
                   </div>
                   <p className="text-sm text-gray-600">
-                    {selectedComponent.manufacturer || 'N/A'} • {selectedComponent.category || 'N/A'}
+                    {selectedComponent.manufacturer || 'N/A'} • {selectedComponent.type || 'N/A'}
                   </p>
                 </div>
 
@@ -1186,27 +1170,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
 
                     {/* Specifications Grid */}
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {selectedComponent.value && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Value
-                          </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.value}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedComponent.price && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Price
-                          </div>
-                          <div className="text-lg font-bold text-gray-900">
-                            ${selectedComponent.price.toFixed(2)}
-                          </div>
-                        </div>
-                      )}
 
                       {selectedComponent.specs?.tolerance && (
                         <div className="rounded-lg bg-white border border-gray-200 p-4">
@@ -1419,7 +1382,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
               {subsystems.map((subsystem) => {
                 const subsystemComps = getSubsystemComponents(subsystem.id);
                 const subsystemReqs = getSubsystemRequirements(subsystem.id);
-                const compliantCount = subsystemComps.filter(c => c.complianceStatus === 'compliant').length;
 
                 return (
                   <button
