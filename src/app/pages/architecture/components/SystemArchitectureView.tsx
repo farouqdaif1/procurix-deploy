@@ -25,9 +25,10 @@ import { Button } from '@/app/shared/components/ui/button';
 import { Input } from '@/app/shared/components/ui/input';
 import { createComponentColorMap } from '../utils/componentColors';
 import { createQuantityMap, getComponentQuantity, createPinoutMap, getComponentPinout } from '../utils/parseBackendResponse';
-import { Settings2 } from 'lucide-react';
+import { Settings2, LayoutGrid } from 'lucide-react';
+import { applyLayout, type LayoutType } from '../utils/layoutAlgorithms';
 
-interface ComponentBlock extends Component {
+export interface ComponentBlock extends Component {
   x: number;
   y: number;
   connections: string[];
@@ -54,6 +55,7 @@ interface SystemArchitectureViewProps {
   components: Component[];
   onArchitectureComplete: (blocks: ComponentBlock[], connections: ConnectionData[]) => void;
   backendResponse?: any; // Optional backend response with component_bom
+  initialConnections?: ConnectionData[]; // Optional initial connections from API
 }
 
 const nodeTypes = {
@@ -222,9 +224,14 @@ const getEdgeStyle = (type: string) => {
 };
 
 // Helper function to extract pin number from pin name and create handle ID
-// Examples: "VIN (Pin 1)" -> "pin-1", "Pin 7" -> "pin-7", "OUTPUT" -> null
+// Examples: "VIN (Pin 1)" -> "pin-1", "Pin 7" -> "pin-7", "default" -> "default", "OUTPUT" -> null
 const extractHandleId = (pinName?: string): string | undefined => {
   if (!pinName) return undefined;
+  
+  // Check if it's the default handle
+  if (pinName.toLowerCase() === 'default') {
+    return 'default';
+  }
   
   // Try to extract pin number from patterns like "Pin 1", "Pin 7", "(Pin 1)", etc.
   const pinMatch = pinName.match(/[Pp]in\s*(\d+)/i);
@@ -243,7 +250,7 @@ const extractHandleId = (pinName?: string): string | undefined => {
   return undefined;
 };
 
-export function SystemArchitectureView({ components, onArchitectureComplete, backendResponse }: SystemArchitectureViewProps) {
+export function SystemArchitectureView({ components, onArchitectureComplete, backendResponse, initialConnections }: SystemArchitectureViewProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(true);
   const [analysisStage, setAnalysisStage] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -255,6 +262,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
   const [openConnectionTypeDropdown, setOpenConnectionTypeDropdown] = useState(false);
   const [showAddConnectionType, setShowAddConnectionType] = useState(false);
   const [newConnectionType, setNewConnectionType] = useState('');
+  const [layoutType, setLayoutType] = useState<LayoutType>('horizontal-flow');
   
   // Load custom connection types from localStorage
   const [customConnectionTypes, setCustomConnectionTypes] = useState<string[]>(() => {
@@ -384,21 +392,25 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
       const targetPinId = extractHandleId(conn.to_pin);
       
       // Construct full handle IDs with component IDs
-      // Only use pins - no default handles allowed
+      // Support both pin handles and default handles
       let sourceHandle: string | undefined;
       let targetHandle: string | undefined;
       
       if (sourcePinId) {
         // Has pin number, use pin handle
         sourceHandle = `${conn.from}-${sourcePinId}`;
+      } else if (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) {
+        // Use default handle if no pin specified or explicitly default
+        sourceHandle = `${conn.from}-default`;
       }
-      // No default handles - connections must use specific pins
       
       if (targetPinId) {
         // Has pin number, use pin handle
         targetHandle = `${conn.to}-${targetPinId}`;
+      } else if (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) {
+        // Use default handle if no pin specified or explicitly default
+        targetHandle = `${conn.to}-default`;
       }
-      // No default handles - connections must use specific pins
       
       // Create a unique key for this connection path
       const connectionKey = `${conn.from}-${conn.to}-${sourceHandle || 'default'}-${targetHandle || 'default'}`;
@@ -482,8 +494,8 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         labelParts.push(`(${conn.pins})`);
       }
       
-      // Use edgeType from connection data, default to 'straight' if not set
-      const edgeType = (conn.edgeType || 'straight') as 'default' | 'straight' | 'step' | 'smoothstep';
+      // Use edgeType from connection data, default to 'smoothstep' if not set
+      const edgeType = (conn.edgeType || 'smoothstep') as 'default' | 'straight' | 'step' | 'smoothstep';
 
       // For smoothstep edges, determine the same direction for both endpoints
       let sourcePosition: Position | undefined;
@@ -585,15 +597,6 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         pinout: pinout, // Use the new pinout object reference
       };
       
-      // Debug: Log node data to verify pinout is included
-      if (Object.keys(pinout).length > 0) {
-        console.log('Creating node with pinout:', {
-          id: block.id,
-          pinout: pinout,
-          pinoutKeys: Object.keys(pinout),
-          pinoutEntries: Object.entries(pinout),
-        });
-      }
       
       return {
         id: block.id,
@@ -603,7 +606,6 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
       } as Node;
     });
     
-    console.log('Updating nodes, total nodes:', updatedNodes.length);
     setNodes(updatedNodes);
   }, [blocks, componentColorMap, setNodes]);
 
@@ -618,19 +620,6 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         ? (window as any).__lastConnectStartHandleId
         : params.sourceHandle;
       
-      // Debug: Log which handles are being used
-      console.log('🔴 Connection params:', {
-        source: params.source,
-        target: params.target,
-        originalSourceHandle: params.sourceHandle,
-        correctedSourceHandle: correctSourceHandle,
-        targetHandle: params.targetHandle,
-        expectedHandle: (window as any).__lastConnectStartHandleId
-      });
-      
-      if (correctSourceHandle !== params.sourceHandle) {
-        console.warn('⚠️ Fixed handle mismatch! Changed from', params.sourceHandle, 'to', correctSourceHandle);
-      }
       
       // Create unique edge ID using sourceHandle and targetHandle to prevent overlapping
       const edgeId = correctSourceHandle || params.targetHandle
@@ -658,7 +647,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
       });
       
       // Extract pin information from handle IDs
-      // Handle IDs are now: ${componentId}-pin-${number}
+      // Handle IDs are: ${componentId}-pin-${number} for pins, or ${componentId}-default for default handle
       const extractPinFromHandle = (handleId?: string | null): string | undefined => {
         if (!handleId) return undefined;
         // Remove component ID prefix (everything before the pin number)
@@ -670,6 +659,10 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
           const cleanPart = pinPart.replace(/-target$/, '');
           if (cleanPart.startsWith('pin-')) {
             return `Pin ${cleanPart.replace('pin-', '')}`;
+          }
+          // Check if it's the default handle
+          if (cleanPart === 'default') {
+            return 'default';
           }
         }
         return handleId;
@@ -683,7 +676,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         type: 'signal',
         from_pin: extractPinFromHandle(params.sourceHandle ?? undefined),
         to_pin: extractPinFromHandle(params.targetHandle ?? undefined),
-        edgeType: 'straight', // Default to straight for new connections
+        edgeType: 'smoothstep', // Default to smoothstep for new connections
       };
       setConnections((prev) => [...prev, newConnection]);
     },
@@ -692,11 +685,6 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
 
   const onConnectStart = useCallback(
     (_event: MouseEvent | TouchEvent, params: { nodeId: string | null; handleId: string | null; handleType: string | null }) => {
-      console.log('🔵 Connection STARTED from:', { 
-        nodeId: params.nodeId, 
-        handleId: params.handleId, 
-        handleType: params.handleType 
-      });
       // Store the starting handle ID to verify it's used correctly
       if (params.handleId) {
         (window as any).__lastConnectStartHandleId = params.handleId;
@@ -706,24 +694,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
   );
 
   const isValidConnection = useCallback(
-    (connection: Connection | Edge) => {
-      const conn = connection as Connection;
-      console.log('🟢 isValidConnection called:', {
-        source: conn.source,
-        target: conn.target,
-        sourceHandle: conn.sourceHandle,
-        targetHandle: conn.targetHandle,
-        expectedHandle: (window as any).__lastConnectStartHandleId
-      });
-      
-      // Verify the sourceHandle matches what we started with
-      if ((window as any).__lastConnectStartHandleId && conn.sourceHandle) {
-        const matches = conn.sourceHandle === (window as any).__lastConnectStartHandleId;
-        if (!matches) {
-          console.error('❌ Handle mismatch! Started with:', (window as any).__lastConnectStartHandleId, 'but got:', conn.sourceHandle);
-        }
-      }
-      
+    (_connection: Connection | Edge) => {
       return true; // Allow all connections for now
     },
     []
@@ -762,8 +733,10 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         // Match by source/target and handles
         const sourcePinId = extractHandleId(conn.from_pin);
         const targetPinId = extractHandleId(conn.to_pin);
-        const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : undefined;
-        const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : undefined;
+        const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : 
+                            (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) ? `${conn.from}-default` : undefined;
+        const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : 
+                            (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) ? `${conn.to}-default` : undefined;
         
         return conn.from === edge.source && 
                conn.to === edge.target &&
@@ -796,8 +769,10 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         // Match by source/target and handles
         const sourcePinId = extractHandleId(conn.from_pin);
         const targetPinId = extractHandleId(conn.to_pin);
-        const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : undefined;
-        const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : undefined;
+        const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : 
+                            (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) ? `${conn.from}-default` : undefined;
+        const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : 
+                            (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) ? `${conn.to}-default` : undefined;
         
         return conn.from === edge.source && 
                conn.to === edge.target &&
@@ -935,43 +910,21 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
     };
   }, [components]);
 
-  const generateInitialLayout = () => {
+  const generateInitialLayout = (connectionsToUse?: ConnectionData[]) => {
     // Use all components from the subsystem
     const selectedComponents = components;
 
-    // Layout components in a linear horizontal flow pattern
-    // Power flow: Buck Controller → LDO
-    const componentOrder = [
-      'MAX8553E',           // Buck Controller
-      'LD39200DPUR'         // LDO
-    ];
-
-    const sortedComponents = selectedComponents.sort((a, b) => {
-      const indexA = componentOrder.indexOf(a.id);
-      const indexB = componentOrder.indexOf(b.id);
-      if (indexA === -1) return 1;
-      if (indexB === -1) return -1;
-      return indexA - indexB;
-    });
-
-    const columnWidth = 500; // Horizontal spacing between components
-    const startX = 200;
-    const startY = 300; // Same Y for all components (horizontal line)
-
     let allBlocks: ComponentBlock[] = [];
-    let autoConnections: ConnectionData[] = [];
+    let autoConnections: ConnectionData[] = connectionsToUse || [];
 
-    // Layout: Linear horizontal layout - all components on the same row
-    sortedComponents.forEach((comp: Component, idx: number) => {
-      let x, y;
-      const category = 
-        comp.id === 'MAX8553E' ? 'Buck Conversion' :
-        comp.id === 'LD39200DPUR' ? 'Linear Regulation' :
-        'Other';
-      
-      // Place all components side by side horizontally on the same row
-      x = startX + idx * columnWidth;
-      y = startY;
+    // If initialConnections are provided, use them instead of generating
+    if (!connectionsToUse && initialConnections && initialConnections.length > 0) {
+      autoConnections = initialConnections;
+    }
+
+    // Create blocks with metadata first (without positions)
+    selectedComponents.forEach((comp: Component) => {
+      const category = 'Component';
       
       // Get quantity and pinout from backend response or count instances
       const partNumber = comp.partNumber || comp.id;
@@ -989,7 +942,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
       } else {
         // Fallback: use component's existing pinout and count instances of same part
         pinout = comp.pinout;
-        const samePartComponents = sortedComponents.filter(c => 
+        const samePartComponents = selectedComponents.filter(c => 
           (c.partNumber || c.id) === partNumber
         );
         if (samePartComponents.length > 1) {
@@ -999,8 +952,8 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
       
       allBlocks.push({
         ...comp,
-        x,
-        y,
+        x: 0, // Will be set by layout algorithm
+        y: 0, // Will be set by layout algorithm
         connections: [],
         category,
         quantity,
@@ -1008,86 +961,90 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
       });
     });
 
-    setBlocks(allBlocks);
+    // Apply selected layout algorithm after all blocks are created
+    const laidOutBlocks = applyLayout(layoutType, allBlocks, autoConnections);
+    setBlocks(laidOutBlocks);
 
-    // Generate ALL connections based on the JSON topology
-    const inputFilter = allBlocks.find(b => b.id === 'SPM5030VT-R68M-D-1');
-    const buckController = allBlocks.find(b => b.id === 'MAX8553E');
-    const buckInductor = allBlocks.find(b => b.id === 'SRP4020TA-1R5M');
-    const interStageFilter = allBlocks.find(b => b.id === 'SPM5030VT-R68M-D-2');
-    const ldo = allBlocks.find(b => b.id === 'LD39200DPUR');
+    // Only generate hardcoded connections if initialConnections are not provided
+    if (!initialConnections || initialConnections.length === 0) {
+      // Generate ALL connections based on the JSON topology (legacy hardcoded connections)
+      const inputFilter = allBlocks.find(b => b.id === 'SPM5030VT-R68M-D-1');
+      const buckController = allBlocks.find(b => b.id === 'MAX8553E');
+      const buckInductor = allBlocks.find(b => b.id === 'SRP4020TA-1R5M');
+      const interStageFilter = allBlocks.find(b => b.id === 'SPM5030VT-R68M-D-2');
+      const ldo = allBlocks.find(b => b.id === 'LD39200DPUR');
 
-    // Power flow connections with connection_type and signal_name
-    // 1. Input Filter → Buck Controller (VIN_FILTERED)
-    if (inputFilter && buckController) {
-      autoConnections.push({
-        id: 'conn-002',
-        from: inputFilter.id,
-        to: buckController.id,
-        type: 'power',
-        connection_type: 'power',
-        signal_name: 'VIN_FILTERED',
-        label: 'VIN_FILTERED',
-        pins: '3.0-5.5V'
-      });
+      // Power flow connections with connection_type and signal_name
+      // 1. Input Filter → Buck Controller (VIN_FILTERED)
+      if (inputFilter && buckController) {
+        autoConnections.push({
+          id: 'conn-002',
+          from: inputFilter.id,
+          to: buckController.id,
+          type: 'power',
+          connection_type: 'power',
+          signal_name: 'VIN_FILTERED',
+          label: 'VIN_FILTERED',
+          pins: '3.0-5.5V'
+        });
+      }
+
+      // 2. Buck Controller → Buck Inductor (Switching Node LX)
+      if (buckController && buckInductor) {
+        autoConnections.push({
+          id: 'conn-003',
+          from: buckController.id,
+          to: buckInductor.id,
+          type: 'switching',
+          connection_type: 'switching',
+          signal_name: 'SW_NODE',
+          label: 'SW_NODE',
+          pins: 'LX (Pin 7)'
+        });
+      }
+
+      // 3. Buck Inductor → Buck Controller (Feedback FB)
+      if (buckInductor && buckController) {
+        autoConnections.push({
+          id: 'conn-004',
+          from: buckInductor.id,
+          to: buckController.id,
+          type: 'power_and_feedback',
+          connection_type: 'power_and_feedback',
+          signal_name: 'VOUT_BUCK',
+          label: 'VOUT_BUCK',
+          pins: 'FB (Pin 5)'
+        });
+      }
+
+      // 4. Buck Inductor → Inter-Stage Filter (VOUT_BUCK)
+      if (buckInductor && interStageFilter) {
+        autoConnections.push({
+          id: 'conn-005',
+          from: buckInductor.id,
+          to: interStageFilter.id,
+          type: 'power',
+          connection_type: 'power',
+          signal_name: 'VOUT_BUCK',
+          label: 'VOUT_BUCK',
+          pins: '3.3-3.6V'
+        });
+      }
+
+      // 5. Inter-Stage Filter → LDO (VOUT_FILTERED)
+      if (interStageFilter && ldo) {
+        autoConnections.push({
+          id: 'conn-006',
+          from: interStageFilter.id,
+          to: ldo.id,
+          type: 'power',
+          connection_type: 'power',
+          signal_name: 'VOUT_FILTERED',
+          label: 'VOUT_FILTERED',
+          pins: '3.3-3.6V'
+        });
+      }
     }
-
-    // 2. Buck Controller → Buck Inductor (Switching Node LX)
-    if (buckController && buckInductor) {
-      autoConnections.push({
-        id: 'conn-003',
-        from: buckController.id,
-        to: buckInductor.id,
-        type: 'switching',
-        connection_type: 'switching',
-        signal_name: 'SW_NODE',
-        label: 'SW_NODE',
-        pins: 'LX (Pin 7)'
-      });
-    }
-
-    // 3. Buck Inductor → Buck Controller (Feedback FB)
-    if (buckInductor && buckController) {
-      autoConnections.push({
-        id: 'conn-004',
-        from: buckInductor.id,
-        to: buckController.id,
-        type: 'power_and_feedback',
-        connection_type: 'power_and_feedback',
-        signal_name: 'VOUT_BUCK',
-        label: 'VOUT_BUCK',
-        pins: 'FB (Pin 5)'
-      });
-    }
-
-    // 4. Buck Inductor → Inter-Stage Filter (VOUT_BUCK)
-    if (buckInductor && interStageFilter) {
-      autoConnections.push({
-        id: 'conn-005',
-        from: buckInductor.id,
-        to: interStageFilter.id,
-        type: 'power',
-        connection_type: 'power',
-        signal_name: 'VOUT_BUCK',
-        label: 'VOUT_BUCK',
-        pins: '3.3-3.6V'
-      });
-    }
-
-    // 5. Inter-Stage Filter → LDO (VOUT_FILTERED)
-    if (interStageFilter && ldo) {
-      autoConnections.push({
-        id: 'conn-006',
-        from: interStageFilter.id,
-        to: ldo.id,
-        type: 'power',
-        connection_type: 'power',
-        signal_name: 'VOUT_FILTERED',
-        label: 'VOUT_FILTERED',
-        pins: '3.3-3.6V'
-      });
-    }
-
 
     setConnections(autoConnections);
   };
@@ -1124,23 +1081,11 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
       specs: component.specs || {},
     };
     
-    console.log('Adding component block:', {
-      id: newBlock.id,
-      pinout: newBlock.pinout,
-      pinoutKeys: Object.keys(newBlock.pinout || {}),
-    });
     
     setBlocks((prev) => [...prev, newBlock]);
   }, [blocks]);
 
   const handleUpdateComponent = useCallback((id: string, updates: Partial<ComponentBlock>) => {
-    console.log('handleUpdateComponent called:', {
-      id,
-      updates,
-      updatesPinout: updates.pinout,
-      updatesPinoutKeys: updates.pinout ? Object.keys(updates.pinout) : [],
-      updatesPinoutEntries: updates.pinout ? Object.entries(updates.pinout) : [],
-    });
     
     setBlocks((prev) => {
       const updated = prev.map((block) => {
@@ -1165,23 +1110,10 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
             position: block.position || { x: block.x, y: block.y },
           };
           
-          console.log('Updated block:', {
-            id: updatedBlock.id,
-            pinout: updatedBlock.pinout,
-            pinoutKeys: Object.keys(updatedBlock.pinout || {}),
-            pinoutEntries: Object.entries(updatedBlock.pinout || {}),
-          });
-          
           return updatedBlock;
         }
         return block;
       });
-      
-      console.log('Blocks after update:', updated.map(b => ({
-        id: b.id,
-        hasPinout: !!b.pinout,
-        pinoutKeys: b.pinout ? Object.keys(b.pinout) : [],
-      })));
       
       return updated;
     });
@@ -1227,8 +1159,10 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         const connection = connections.find(conn => {
           const sourcePinId = extractHandleId(conn.from_pin);
           const targetPinId = extractHandleId(conn.to_pin);
-          const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : undefined;
-          const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : undefined;
+          const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : 
+                              (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) ? `${conn.from}-default` : undefined;
+          const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : 
+                              (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) ? `${conn.to}-default` : undefined;
           
           return conn.from === edgeToDelete.source && 
                  conn.to === edgeToDelete.target &&
@@ -1364,19 +1298,55 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
           }}
           className="bg-white border border-gray-200 rounded-lg"
         />
-        <Panel position="top-right" className="m-4 flex gap-2">
-          <Button 
-            onClick={() => setIsBuilderMode(!isBuilderMode)} 
-            variant={isBuilderMode ? "default" : "outline"}
-            className="gap-2"
-          >
-            <Settings2 className="h-4 w-4" />
-            {isBuilderMode ? 'Exit Builder' : 'Builder Mode'}
-          </Button>
-          <Button onClick={handleComplete} className="gap-2">
-            <CheckCircle className="h-4 w-4" />
-            Complete Architecture
-          </Button>
+        <Panel position="top-right" className="m-4 flex flex-col gap-2">
+          <div className="flex gap-2">
+            <Button 
+              onClick={() => setIsBuilderMode(!isBuilderMode)} 
+              variant={isBuilderMode ? "default" : "outline"}
+              className="gap-2"
+            >
+              <Settings2 className="h-4 w-4" />
+              {isBuilderMode ? 'Exit Builder' : 'Builder Mode'}
+            </Button>
+            <Button onClick={handleComplete} className="gap-2">
+              <CheckCircle className="h-4 w-4" />
+              Complete Architecture
+            </Button>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {blocks.length > 0 && (
+              <>
+                <Button
+                  onClick={() => {
+                    setLayoutType('horizontal-flow');
+                    // Re-apply layout to existing blocks
+                    const laidOutBlocks = applyLayout('horizontal-flow', blocks, connections);
+                    setBlocks(laidOutBlocks);
+                  }}
+                  variant={layoutType === 'horizontal-flow' ? "default" : "outline"}
+                  size="sm"
+                  className="gap-2"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  Horizontal Flow
+                </Button>
+                <Button
+                  onClick={() => {
+                    setLayoutType('dagre-tree');
+                    // Re-apply layout to existing blocks
+                    const laidOutBlocks = applyLayout('dagre-tree', blocks, connections);
+                    setBlocks(laidOutBlocks);
+                  }}
+                  variant={layoutType === 'dagre-tree' ? "default" : "outline"}
+                  size="sm"
+                  className="gap-2"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  Dagre Tree
+                </Button>
+              </>
+            )}
+          </div>
         </Panel>
         
         {/* Edge Type Selection Panel */}
@@ -1388,8 +1358,10 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
           const connection = connections.find(conn => {
             const sourcePinId = extractHandleId(conn.from_pin);
             const targetPinId = extractHandleId(conn.to_pin);
-            const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : undefined;
-            const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : undefined;
+            const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : 
+                                (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) ? `${conn.from}-default` : undefined;
+            const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : 
+                                (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) ? `${conn.to}-default` : undefined;
             
             return conn.from === selectedEdge.source && 
                    conn.to === selectedEdge.target &&
@@ -1397,7 +1369,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
                    (targetHandle || 'default') === (selectedEdge.targetHandle || 'default');
           });
           
-          const currentEdgeType = connection?.edgeType || 'straight';
+          const currentEdgeType = connection?.edgeType || 'smoothstep';
           const currentConnectionType = connection?.type || 'signal';
           
           return (

@@ -282,3 +282,34 @@ export async function updateRequirement(
 
     return response.json();
 }
+
+export interface Connection {
+    source_part: string;
+    target_part: string | null;
+    connection_type: string;
+    reasoning: string;
+}
+
+export interface AnalyzeConnectionsResponse {
+    success: boolean;
+    bom_id: string;
+    connections_analyzed: number;
+    connections_saved: number;
+    connections: Connection[];
+}
+
+export async function analyzeConnections(sessionId: string): Promise<AnalyzeConnectionsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/analyze-connections`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to analyze connections: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}

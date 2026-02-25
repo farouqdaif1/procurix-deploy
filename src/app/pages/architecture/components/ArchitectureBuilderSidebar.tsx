@@ -263,24 +263,10 @@ export function ArchitectureBuilderSidebar({
 
     // Convert pinout entries to object - generate pin numbers dynamically
     const pinout: Record<string, { name: string; type: string; description: string }> = {};
-    console.log('Converting pinout entries:', {
-      pinoutEntries,
-      length: pinoutEntries.length,
-      entries: pinoutEntries.map((e, i) => ({ index: i, ...e }))
-    });
     
     pinoutEntries.forEach(({ name, type, description }, index) => {
       // Generate pin number dynamically (1-based index)
       const pinNumber = String(index + 1);
-      
-      console.log(`Processing pin entry ${index}:`, { 
-        pinNumber, 
-        name, 
-        type, 
-        description,
-        nameTrimmed: name?.trim(),
-        hasName: !!name && !!name.trim(),
-      });
       
       // Only require name to be non-empty (pin number is auto-generated)
       if (name && name.trim()) {
@@ -289,19 +275,7 @@ export function ArchitectureBuilderSidebar({
           type: (type && type.trim()) || 'INPUT',
           description: (description && description.trim()) || '',
         };
-        console.log(`✅ Added pin to pinout: ${pinNumber}`, pinout[pinNumber]);
-      } else {
-        console.warn(`❌ Skipping pin entry ${index} - missing name:`, { 
-          name,
-          nameValid: !!(name && name.trim()),
-        });
       }
-    });
-    console.log('Final pinout object:', {
-      pinout,
-      keys: Object.keys(pinout),
-      entries: Object.entries(pinout),
-      isEmpty: Object.keys(pinout).length === 0,
     });
 
     // Always include pinout, even if empty - this ensures it's saved
@@ -326,19 +300,6 @@ export function ArchitectureBuilderSidebar({
     
     // Ensure pinout is always an object (never undefined)
     finalComponent.pinout = finalComponent.pinout || {};
-    
-    // Debug: Log the component being saved
-    console.log('💾 Saving component:', {
-      id: finalComponent.id,
-      reference: finalComponent.reference,
-      pinout: finalComponent.pinout,
-      pinoutKeys: Object.keys(finalComponent.pinout),
-      pinoutEntries: pinoutEntries,
-      pinoutEntriesLength: pinoutEntries.length,
-      validPinoutEntries: pinoutEntries.filter(p => p.name?.trim()).length,
-      specs: finalComponent.specs,
-      specsKeys: Object.keys(finalComponent.specs || {}),
-    });
 
     if (editingComponentId) {
       onUpdateComponent(editingComponentId, finalComponent);

@@ -16,15 +16,6 @@ export const ComponentNode = (props: NodeProps) => {
   const data = props.data as unknown as ComponentNodeData;
   const selected = props.selected;
   
-  // Debug: Log when component receives new data
-  console.log('ComponentNode render:', {
-    id: data.id,
-    hasPinout: !!data.pinout,
-    pinoutKeys: data.pinout ? Object.keys(data.pinout) : [],
-    pinoutEntries: data.pinout ? Object.entries(data.pinout) : [],
-    pinoutType: typeof data.pinout,
-    pinoutValue: data.pinout,
-  });
   
   // Get color for this component based on partNumber (component_id)
   const componentColor = data.componentColor || getComponentColor(data.partNumber || data.id);
@@ -102,27 +93,14 @@ export const ComponentNode = (props: NodeProps) => {
   };
 
   // Generate handles - returns handles separately from pin content
-  // Only show handles if pinout is defined and has pins
+  // Only generates handles when pins are defined
   const generateHandles = () => {
     const componentId = data.id;
     
-    // Debug pinout check
-    console.log('generateHandles check:', {
-      id: componentId,
-      hasPinout: !!data.pinout,
-      pinoutType: typeof data.pinout,
-      pinoutValue: data.pinout,
-      pinoutKeys: data.pinout ? Object.keys(data.pinout) : [],
-      pinoutLength: data.pinout ? Object.keys(data.pinout).length : 0,
-    });
-    
-    // No default handles - user must add pins explicitly
+    // Only generate handles if pins are defined
     if (!data.pinout || Object.keys(data.pinout).length === 0) {
-      console.log('No handles generated - pinout is empty or missing');
       return null;
     }
-    
-    console.log('Generating handles for', Object.keys(data.pinout).length, 'pins');
 
     const pins = Object.entries(data.pinout).sort(([a], [b]) => {
       const numA = parseInt(a) || 0;
@@ -215,6 +193,31 @@ export const ComponentNode = (props: NodeProps) => {
       }`}
       style={{ minWidth: '280px', maxWidth: '320px' }}
     >
+      {/* Default handle on top when no pins */}
+      {(!data.pinout || Object.keys(data.pinout).length === 0) && (
+        <Handle
+          key="handle-default-top"
+          id={`${data.id}-default`}
+          type="source"
+          position={Position.Top}
+          className="w-4 h-4"
+          style={{
+            top: 0,
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '20px',
+            height: '20px',
+            borderRadius: '50%',
+            backgroundColor: '#6b7280', // Default gray color
+            border: '2px solid white',
+            boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
+          }}
+          data-pin-number="default"
+          data-pin-name="default"
+          data-pin-type="default"
+        />
+      )}
+      
       {/* Colored Type Section at Top */}
       <div 
         className="px-4 py-2 border-b"
