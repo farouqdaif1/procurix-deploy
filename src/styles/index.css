@@ -1,0 +1,7 @@
+@import './tailwind.css';
+@import './theme.css';
+
+/* Sonner Toast Styles */
+:root {
+  --toast-width: 356px;
+}
