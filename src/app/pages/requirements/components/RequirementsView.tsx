@@ -370,7 +370,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
               </button>
               {categories.map((category) => {
                 const count = requirements.filter(r => r.category === category).length;
-                const categoryIcons: Record<string, JSX.Element> = {
+                const categoryIcons: Record<string, React.JSX.Element> = {
                   'Power Supply': <Zap className="h-4 w-4" />,
                   'Voltage Regulation': <Gauge className="h-4 w-4" />,
                   'Battery Management': <Battery className="h-4 w-4" />,

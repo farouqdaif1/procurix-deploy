@@ -207,7 +207,7 @@ export function randomLayout(
   const rightZoneStart = viewportWidth * 0.7; // Right 30% for medium connections
 
   // Place each block based on its connection count
-  sortedBlocks.forEach((block, index) => {
+  sortedBlocks.forEach((block) => {
     const connectionCount = connectionCounts.get(block.id) || 0;
     
     // Determine which zone based on connection count
@@ -328,7 +328,7 @@ function centerBlocksInViewport(blocks: ComponentBlock[]): ComponentBlock[] {
 
 // Main layout function
 export function applyLayout(
-  layoutType: LayoutType,
+  _layoutType: LayoutType,
   blocks: ComponentBlock[],
   connections: ConnectionData[]
 ): ComponentBlock[] {

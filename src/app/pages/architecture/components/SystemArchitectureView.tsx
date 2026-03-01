@@ -19,7 +19,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import type { Component } from '@/app/types';
 import { motion } from 'motion/react';
-import { Layers, CheckCircle, ChevronDown, Plus } from 'lucide-react';
+import { CheckCircle, ChevronDown, Plus } from 'lucide-react';
 import { ComponentNode } from './ComponentNode';
 import { ArchitectureBuilderSidebar } from './ArchitectureBuilderSidebar';
 import { CustomEdge } from './CustomEdge';

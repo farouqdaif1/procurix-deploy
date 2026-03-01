@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Component } from '@/app/types';
-import { CheckCircle, Loader2, AlertCircle, Check, Search, X } from 'lucide-react';
+import { CheckCircle, AlertCircle, Search, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
