@@ -8,16 +8,17 @@ import { useSession } from '@/app/context/SessionContext';
 import { getRouteForStage } from '@/app/shared/utils/navigation';
 
 // Map API stage number to SessionStage type
+// Stages: 1=Upload, 2=Classification, 3=Analysis, 4=Validation, 5=Requirements, 6=Connections, 7=Subsystems, 8=Subsystem Reqs, 9=Finalization
 const mapStageNumberToStage = (stageNumber: number): SessionStage => {
-  // Map stage numbers to workflow stages
-  // Stage 7 appears to be completed/compliance based on the data
-  if (stageNumber >= 7) return 'compliance';
-  if (stageNumber >= 6) return 'review';
-  if (stageNumber >= 5) return 'subsystems';
-  if (stageNumber >= 4) return 'requirements';
-  if (stageNumber >= 3) return 'architecture';
-  if (stageNumber >= 2) return 'analysis';
-  return 'fundamental'; // Stage 1
+  if (stageNumber >= 9) return 'review'; // Stage 9: Status & Finalization
+  if (stageNumber >= 8) return 'subsystems'; // Stage 8: Subsystem Requirements
+  if (stageNumber >= 7) return 'subsystems'; // Stage 7: Subsystems
+  if (stageNumber >= 6) return 'architecture'; // Stage 6: Part Connections
+  if (stageNumber >= 5) return 'requirements'; // Stage 5: Requirements
+  if (stageNumber >= 4) return 'validate'; // Stage 4: Validation
+  if (stageNumber >= 3) return 'analysis'; // Stage 3: System Analysis
+  if (stageNumber >= 2) return 'fundamental'; // Stage 2: Classification
+  return 'upload'; // Stage 1: Upload & Parse
 };
 
 export function LibraryPage() {
@@ -37,7 +38,7 @@ export function LibraryPage() {
         const stageMap = new Map<string, number>();
         const transformedSessions: BOMSession[] = response.boms.map((bom) => {
           const stage = mapStageNumberToStage(bom.current_stage);
-          const isComplete = bom.current_stage >= 7; // Stage 7+ is considered complete
+          const isComplete = bom.current_stage >= 9; // Stage 9 is considered complete
           
           // Store original stage number for navigation
           stageMap.set(bom.bom_id, bom.current_stage);
@@ -56,7 +57,9 @@ export function LibraryPage() {
             compliantComponents: 0, // Not provided by API
             createdAt: new Date(bom.created_at),
             updatedAt: new Date(bom.created_at),
-          };
+            // Store original stage number for accurate progress calculation
+            currentStageNumber: bom.current_stage,
+          } as BOMSession & { currentStageNumber: number };
         });
 
         setSessions(transformedSessions);

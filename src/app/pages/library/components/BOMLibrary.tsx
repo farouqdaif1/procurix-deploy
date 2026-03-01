@@ -15,31 +15,38 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'complete' | 'in-progress'>('all');
 
-  const getStageLabel = (stage: string) => {
+  const getStageLabel = (stage: string, stageNumber?: number) => {
+    // Special case: stage 8 is Subsystem Requirements (same page as stage 7 but different label)
+    if (stageNumber === 8) {
+      return 'Subsystem Requirements';
+    }
+    
     const labels: Record<string, string> = {
-      upload: 'Upload',
-      discovery: 'Discovery',
-      identify: 'Identification',
+      upload: 'Upload & Parse',
       fundamental: 'Classification',
-      analysis: 'Analysis',
+      analysis: 'System Analysis',
       validate: 'Validation',
-      architecture: 'Architecture',
       requirements: 'Requirements',
+      architecture: 'Part Connections',
       subsystems: 'Subsystems',
-      compliance: 'Compliance Analysis',
-      review: 'Review',
+      review: 'Status & Finalization',
     };
     return labels[stage] || stage;
   };
 
-  const getStageProgress = (stage: string) => {
-    const stages = ['upload', 'fundamental', 'analysis', 'validate', 'architecture', 'requirements', 'subsystems', 'compliance', 'review'];
+  const getStageProgress = (stage: string, stageNumber?: number) => {
+    // If we have the original stage number, use it directly for accurate progress
+    if (stageNumber !== undefined) {
+      return (stageNumber / 9) * 100; // 9 total stages
+    }
+    // Fallback: calculate based on stage name
+    const stages = ['upload', 'fundamental', 'analysis', 'validate', 'requirements', 'architecture', 'subsystems', 'review'];
     const currentIndex = stages.indexOf(stage);
     if (currentIndex === -1) return 0;
-    return ((currentIndex + 1) / stages.length) * 100;
+    return ((currentIndex + 1) / 9) * 100; // 9 total stages
   };
 
-  const isComplete = (session: BOMSession) => session.stage === 'compliance' && session.complianceScore !== undefined;
+  const isComplete = (session: BOMSession) => session.stage === 'review' || (session.stage === 'subsystems' && session.complianceScore !== undefined);
 
   const filteredSessions = sessions.filter((session) => {
     const matchesSearch = session.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -186,7 +193,9 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
             <div className="grid gap-4">
               {filteredSessions.map((session) => {
                 const complete = isComplete(session);
-                const progress = complete ? 100 : getStageProgress(session.stage);
+                // Use currentStageNumber if available (from LibraryPage), otherwise fallback to stage name
+                const stageNumber = (session as any).currentStageNumber;
+                const progress = complete ? 100 : getStageProgress(session.stage, stageNumber);
                 
                 return (
                   <button
@@ -212,7 +221,7 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
                             ) : (
                               <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">
                                 <Clock className="h-3 w-3 mr-1" />
-                                {getStageLabel(session.stage)}
+                                {getStageLabel(session.stage, stageNumber)}
                               </Badge>
                             )}
                           </div>
@@ -258,7 +267,7 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
                       <div className="space-y-2">
                         <div className="flex items-center justify-between text-sm">
                           <span className="font-medium text-gray-700">
-                            {complete ? 'Workflow Complete' : `Stage: ${getStageLabel(session.stage)}`}
+                            {complete ? 'Workflow Complete' : `Stage: ${getStageLabel(session.stage, stageNumber)}`}
                           </span>
                           <span className="text-gray-600">{Math.round(progress)}%</span>
                         </div>
