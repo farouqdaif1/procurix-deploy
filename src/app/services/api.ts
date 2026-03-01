@@ -62,7 +62,7 @@ export interface ClassifyPartsResponse {
     total_parts: number;
     auxiliary_parts: number;
     non_auxiliary_parts: number;
-    classification_map: Record<string, 'auxiliary' | 'non-auxiliary'>;
+    classification_map: Record<string, 'auxiliary' | 'non-auxiliary' | null>;
 }
 
 export async function classifyParts(sessionId: string): Promise<ClassifyPartsResponse> {
@@ -99,19 +99,33 @@ export async function updateClassification(
     mpn: string,
     newClassification: 'auxiliary' | 'non-auxiliary'
 ): Promise<UpdateClassificationResponse> {
+    // Validate inputs
+    if (!mpn || mpn.trim() === '') {
+        throw new Error('MPN (Manufacturer Part Number) is required');
+    }
+
+    if (newClassification !== 'auxiliary' && newClassification !== 'non-auxiliary') {
+        throw new Error(`Invalid classification: ${newClassification}. Must be 'auxiliary' or 'non-auxiliary'`);
+    }
+
+    const requestBody = {
+        mpn: mpn.trim(),
+        new_classification: newClassification,
+    };
+
+    console.log('Update classification request:', { sessionId, ...requestBody });
+
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/update-classification`, {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-            mpn: mpn,
-            new_classification: newClassification,
-        }),
+        body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
         const errorText = await response.text();
+        console.error('Update classification error:', { status: response.status, errorText, requestBody });
         throw new Error(`Failed to update classification: ${response.status} ${errorText}`);
     }
 
@@ -309,6 +323,205 @@ export async function analyzeConnections(sessionId: string): Promise<AnalyzeConn
     if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to analyze connections: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface BOMListItem {
+    bom_id: string;
+    session_id: string;
+    system_type: string;
+    total_parts: number;
+    created_at: string;
+    current_stage: number;
+}
+
+export interface GetAllBOMsResponse {
+    success: boolean;
+    boms_count: number;
+    boms: BOMListItem[];
+}
+
+export async function getAllBOMs(): Promise<GetAllBOMsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/boms`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to fetch BOMs: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+// GET endpoints for fetching existing data
+
+export async function getClassification(sessionId: string): Promise<ClassifyPartsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/classification`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get classification: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface SystemAnalysisResponse {
+    success: boolean;
+    session_id: string;
+    suggestions: SystemSuggestion[];
+}
+
+export interface GetSystemAnalysisResponse {
+    success: boolean;
+    system_analysis: {
+        system_type: string;
+        primary_function: string;
+        architectural_clues: string[];
+        application_domains: string[];
+    };
+}
+
+export async function getSystemAnalysis(sessionId: string): Promise<SystemAnalysisResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/system-analysis`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get system analysis: ${response.status} ${errorText}`);
+    }
+
+    const data: GetSystemAnalysisResponse = await response.json();
+
+    // Transform GET response to match POST response format
+    return {
+        success: data.success,
+        session_id: sessionId,
+        suggestions: [{
+            systemType: data.system_analysis.system_type,
+            primaryFunction: data.system_analysis.primary_function,
+            keyArchitecturalClues: data.system_analysis.architectural_clues,
+            likelyApplicationDomains: data.system_analysis.application_domains,
+            confidence: 'high' as const, // Default to high since it's the selected analysis
+            reasoning: `System identified as ${data.system_analysis.system_type} based on architectural clues: ${data.system_analysis.architectural_clues.join(', ')}`,
+        }],
+    };
+}
+
+export async function getValidationResults(sessionId: string): Promise<ValidateResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/validation-results`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get validation results: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export async function getConnections(sessionId: string, bomId: string): Promise<AnalyzeConnectionsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/connections/${bomId}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get connections: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface Subsystem {
+    id: string;
+    name: string;
+    type: string;
+    componentIds: string[];
+    complianceScore?: number;
+}
+
+export interface SubsystemsResponse {
+    success: boolean;
+    session_id: string;
+    subsystems: Subsystem[];
+}
+
+export async function getSubsystems(sessionId: string): Promise<SubsystemsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get subsystems: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface SubsystemRequirementsResponse {
+    success: boolean;
+    session_id: string;
+    subsystem_requirements: Array<{
+        subsystem_id: string;
+        requirements: Requirement[];
+    }>;
+}
+
+export async function getSubsystemRequirements(sessionId: string): Promise<SubsystemRequirementsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/requirements`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get subsystem requirements: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+// GET version of getRequirements (currently only POST exists)
+export async function getRequirementsGET(sessionId: string): Promise<RequirementsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get requirements: ${response.status} ${errorText}`);
     }
 
     return response.json();

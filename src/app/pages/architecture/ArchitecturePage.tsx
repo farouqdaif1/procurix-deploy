@@ -3,20 +3,31 @@ import { useNavigate } from 'react-router-dom';
 import { SystemArchitectureView } from './components/SystemArchitectureView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { analyzeConnections, type Connection } from '@/app/services/api';
+import { analyzeConnections, getConnections, type Connection } from '@/app/services/api';
+import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
 import type { Component } from '@/app/types';
 
 export function ArchitecturePage() {
   const navigate = useNavigate();
-  const { sessionId } = useSession();
+  const { sessionId: contextSessionId, setSessionId } = useSession();
+  const { sessionId: querySessionId, updateParams } = useQueryParams();
   const [components, setComponents] = useState<Component[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Sync session ID from query params
+  useEffect(() => {
+    if (querySessionId && querySessionId !== contextSessionId) {
+      setSessionId(querySessionId);
+    }
+  }, [querySessionId, contextSessionId, setSessionId]);
+
   useEffect(() => {
     const fetchConnections = async () => {
-      if (!sessionId) {
+      const activeSessionId = contextSessionId || querySessionId;
+      
+      if (!activeSessionId) {
         setError('No session ID available');
         setIsLoading(false);
         return;
@@ -24,11 +35,40 @@ export function ArchitecturePage() {
 
       try {
         setIsLoading(true);
-        console.log('Session ID:', sessionId);
-        const response = await analyzeConnections(sessionId);
+        setError(null);
+        console.log('Session ID:', activeSessionId);
         
-        // Log connections from backend
-        console.log('Connections from backend:', response.connections);
+        // Update URL with session query param
+        updateParams(activeSessionId);
+        
+        // Try GET first, fallback to POST if 404 or if connections are empty
+        let response;
+        try {
+          // Use sessionId as bomId (they're the same in API response)
+          response = await getConnections(activeSessionId, activeSessionId);
+          console.log('Got connections from GET endpoint');
+          
+          // Log connections from backend
+          console.log('Connections from backend:', response.connections);
+          
+          // Check if connections are empty (not generated yet)
+          if (!response.connections || response.connections.length === 0) {
+            console.log('Connections are empty, generating...');
+            response = await analyzeConnections(activeSessionId);
+            console.log('Generated connections from POST endpoint');
+            console.log('Connections from backend:', response.connections);
+          }
+        } catch (getError: any) {
+          // If 404, try POST to generate connections
+          if (getError.message?.includes('404') || getError.message?.includes('Failed to get connections: 404')) {
+            console.log('Connections not found, generating...');
+            response = await analyzeConnections(activeSessionId);
+            console.log('Generated connections from POST endpoint');
+            console.log('Connections from backend:', response.connections);
+          } else {
+            throw getError;
+          }
+        }
         
         // Extract unique part numbers from connections
         const uniqueParts = new Set<string>();
@@ -95,11 +135,16 @@ export function ArchitecturePage() {
     };
 
     fetchConnections();
-  }, [sessionId]);
+  }, [contextSessionId, querySessionId, updateParams]);
 
   const handleArchitectureComplete = () => {
+    const activeSessionId = contextSessionId || querySessionId;
     toast.success('System architecture defined!');
-    navigate('/requirements');
+    if (activeSessionId) {
+      navigate(`/requirements?session=${activeSessionId}`);
+    } else {
+      navigate('/requirements');
+    }
   };
 
   if (isLoading) {

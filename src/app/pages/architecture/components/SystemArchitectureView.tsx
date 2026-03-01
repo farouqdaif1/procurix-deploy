@@ -7,6 +7,8 @@ import {
   Panel,
   useNodesState,
   useEdgesState,
+  useReactFlow,
+  ReactFlowProvider,
   addEdge,
   ConnectionMode,
   Position,
@@ -25,7 +27,7 @@ import { Button } from '@/app/shared/components/ui/button';
 import { Input } from '@/app/shared/components/ui/input';
 import { createComponentColorMap } from '../utils/componentColors';
 import { createQuantityMap, getComponentQuantity, createPinoutMap, getComponentPinout } from '../utils/parseBackendResponse';
-import { Settings2, LayoutGrid } from 'lucide-react';
+import { Settings2, Shuffle } from 'lucide-react';
 import { applyLayout, type LayoutType } from '../utils/layoutAlgorithms';
 
 export interface ComponentBlock extends Component {
@@ -151,8 +153,8 @@ const getEdgeStyle = (type: string) => {
     case 'power':
       return {
         ...baseStyle,
-        strokeWidth: 4,
-        strokeDasharray: undefined, // solid line
+        strokeWidth: 3,
+        // No strokeDasharray = solid line
       };
     case 'switching':
       return {
@@ -170,7 +172,7 @@ const getEdgeStyle = (type: string) => {
       return {
         ...baseStyle,
         strokeWidth: 3,
-        strokeDasharray: undefined, // solid line
+        // No strokeDasharray = solid line
       };
     case 'data':
       return {
@@ -250,7 +252,9 @@ const extractHandleId = (pinName?: string): string | undefined => {
   return undefined;
 };
 
-export function SystemArchitectureView({ components, onArchitectureComplete, backendResponse, initialConnections }: SystemArchitectureViewProps) {
+// Inner component that uses useReactFlow hook
+function SystemArchitectureViewInner({ components, onArchitectureComplete, backendResponse, initialConnections }: SystemArchitectureViewProps) {
+  const { fitView } = useReactFlow();
   const [isAnalyzing, setIsAnalyzing] = useState(true);
   const [analysisStage, setAnalysisStage] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -262,7 +266,17 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
   const [openConnectionTypeDropdown, setOpenConnectionTypeDropdown] = useState(false);
   const [showAddConnectionType, setShowAddConnectionType] = useState(false);
   const [newConnectionType, setNewConnectionType] = useState('');
-  const [layoutType, setLayoutType] = useState<LayoutType>('horizontal-flow');
+  const [layoutType, setLayoutType] = useState<LayoutType>('random');
+  
+  // Fit view after blocks change
+  useEffect(() => {
+    if (blocks.length > 0) {
+      // Use setTimeout to ensure nodes are rendered before fitting
+      setTimeout(() => {
+        fitView({ padding: 0.2, duration: 300 });
+      }, 100);
+    }
+  }, [blocks, fitView]);
   
   // Load custom connection types from localStorage
   const [customConnectionTypes, setCustomConnectionTypes] = useState<string[]>(() => {
@@ -494,8 +508,8 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         labelParts.push(`(${conn.pins})`);
       }
       
-      // Use edgeType from connection data, default to 'smoothstep' if not set
-      const edgeType = (conn.edgeType || 'smoothstep') as 'default' | 'straight' | 'step' | 'smoothstep';
+      // Use edgeType from connection data, default to 'default' (bezier) if not set
+      const edgeType = (conn.edgeType || 'default') as 'default' | 'straight' | 'step' | 'smoothstep';
 
       // For smoothstep edges, determine the same direction for both endpoints
       let sourcePosition: Position | undefined;
@@ -547,7 +561,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         type: edgeType, // Use edgeType from connection data
         sourcePosition: sourcePosition,
         targetPosition: targetPosition,
-        animated: conn.type === 'switching' || conn.type === 'power',
+        animated: conn.type === 'switching', // Only animate switching, not power
         style: getEdgeStyle(conn.type),
         zIndex: 1,
         label: (isHovered || isSelected) ? labelText : undefined, // Show label on hover or when selected
@@ -630,7 +644,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         ...params,
         sourceHandle: correctSourceHandle,
         id: edgeId,
-        type: 'smoothstep',
+        type: 'default',
         animated: true,
         style: getEdgeStyle('signal'), // Default to signal type styling for new connections
       };
@@ -676,7 +690,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         type: 'signal',
         from_pin: extractPinFromHandle(params.sourceHandle ?? undefined),
         to_pin: extractPinFromHandle(params.targetHandle ?? undefined),
-        edgeType: 'smoothstep', // Default to smoothstep for new connections
+        edgeType: 'default', // Default to bezier for new connections
       };
       setConnections((prev) => [...prev, newConnection]);
     },
@@ -1196,21 +1210,6 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
     return (
       <div className="h-full overflow-y-auto p-8 bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
         <div className="w-full max-w-2xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center mb-8"
-          >
-            <div className="inline-flex items-center justify-center w-24 h-24 rounded-3xl bg-gradient-to-br from-purple-500 to-pink-600 mb-6 shadow-2xl">
-              <Layers className="h-12 w-12 text-white animate-pulse" />
-            </div>
-            <h2 className="text-4xl font-bold text-white mb-3">
-              Define System Topology
-            </h2>
-            <p className="text-purple-200 text-lg">
-              Design component interconnections before generating requirements • {components.length} identified components
-            </p>
-          </motion.div>
 
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -1237,9 +1236,9 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
               </div>
                   </div>
                 </motion.div>
-        </div>
       </div>
-    );
+    </div>
+  );
   }
 
   return (
@@ -1315,36 +1314,24 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
           </div>
           <div className="flex gap-2 flex-wrap">
             {blocks.length > 0 && (
-              <>
-                <Button
-                  onClick={() => {
-                    setLayoutType('horizontal-flow');
-                    // Re-apply layout to existing blocks
-                    const laidOutBlocks = applyLayout('horizontal-flow', blocks, connections);
-                    setBlocks(laidOutBlocks);
-                  }}
-                  variant={layoutType === 'horizontal-flow' ? "default" : "outline"}
-                  size="sm"
-                  className="gap-2"
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                  Horizontal Flow
-                </Button>
-                <Button
-                  onClick={() => {
-                    setLayoutType('dagre-tree');
-                    // Re-apply layout to existing blocks
-                    const laidOutBlocks = applyLayout('dagre-tree', blocks, connections);
-                    setBlocks(laidOutBlocks);
-                  }}
-                  variant={layoutType === 'dagre-tree' ? "default" : "outline"}
-                  size="sm"
-                  className="gap-2"
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                  Dagre Tree
-                </Button>
-              </>
+              <Button
+                onClick={() => {
+                  setLayoutType('random');
+                  // Re-apply layout to existing blocks - this will generate new random positions
+                  const laidOutBlocks = applyLayout('random', blocks, connections);
+                  setBlocks(laidOutBlocks);
+                  // Fit view after layout
+                  setTimeout(() => {
+                    fitView({ padding: 0.2, duration: 300 });
+                  }, 100);
+                }}
+                variant="outline"
+                size="sm"
+                className="gap-2"
+              >
+                <Shuffle className="h-4 w-4" />
+                Rearrange
+              </Button>
             )}
           </div>
         </Panel>
@@ -1369,7 +1356,7 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
                    (targetHandle || 'default') === (selectedEdge.targetHandle || 'default');
           });
           
-          const currentEdgeType = connection?.edgeType || 'smoothstep';
+          const currentEdgeType = connection?.edgeType || 'default';
           const currentConnectionType = connection?.type || 'signal';
           
           return (
@@ -1584,5 +1571,19 @@ export function SystemArchitectureView({ components, onArchitectureComplete, bac
         />
       )}
     </div>
+  );
+}
+
+// Wrapper component that provides ReactFlow context
+export function SystemArchitectureView({ components, onArchitectureComplete, backendResponse, initialConnections }: SystemArchitectureViewProps) {
+  return (
+    <ReactFlowProvider>
+      <SystemArchitectureViewInner 
+        components={components}
+        onArchitectureComplete={onArchitectureComplete}
+        backendResponse={backendResponse}
+        initialConnections={initialConnections}
+      />
+    </ReactFlowProvider>
   );
 }

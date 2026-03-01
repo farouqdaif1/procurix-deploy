@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, Edit2, X, Check, Zap, Plus, Upload, FileText, Filter, Search, Loader2 } from 'lucide-react';
+import { CheckCircle, Edit2, X, Check, Zap, Plus, Upload, FileText, Filter, Search, Loader2, Battery, Gauge, Thermometer, Shield, Rocket, Globe, Settings, Cpu } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { getRequirements, updateRequirement, type Requirement as APIRequirement } from '@/app/services/api';
+import { getRequirements, getRequirementsGET, updateRequirement, type Requirement as APIRequirement } from '@/app/services/api';
 
 interface Requirement {
   id: string;
@@ -29,6 +29,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [savingRequirementId, setSavingRequirementId] = useState<string | null>(null);
   const [newRequirement, setNewRequirement] = useState({
     category: '',
     title: '',
@@ -49,7 +50,28 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
       setError(null);
 
       try {
-        const result = await getRequirements(sessionId);
+        // Try GET first, fallback to POST if 404 or if requirements are empty
+        let result;
+        try {
+          result = await getRequirementsGET(sessionId);
+          console.log('Got requirements from GET endpoint');
+          
+          // Check if requirements are empty (not generated yet)
+          if (result.requirements_count === 0 || (result.requirements && result.requirements.length === 0)) {
+            console.log('Requirements are empty, generating...');
+            result = await getRequirements(sessionId);
+            console.log('Generated requirements from POST endpoint');
+          }
+        } catch (getError: any) {
+          // If 404, try POST to generate requirements
+          if (getError.message?.includes('404') || getError.message?.includes('Failed to get requirements: 404')) {
+            console.log('Requirements not found, generating...');
+            result = await getRequirements(sessionId);
+            console.log('Generated requirements from POST endpoint');
+          } else {
+            throw getError;
+          }
+        }
         
         if (!result.success) {
           throw new Error('Requirements request was not successful');
@@ -89,7 +111,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
     );
   };
 
-  const handleSaveEdit = async (reqId: string, newValue: string) => {
+  const handleSaveEdit = async (reqId: string, updates: { title?: string; description?: string; value?: string }) => {
     if (!sessionId) {
       toast.error('No session found');
       return;
@@ -98,16 +120,20 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
     const requirement = requirements.find(req => req.id === reqId);
     if (!requirement) return;
 
+    setSavingRequirementId(reqId);
+
     try {
-      // Parse BOM references from the value (comma-separated)
-      const bomReference = newValue.split(',').map(ref => ref.trim()).filter(ref => ref.length > 0);
+      // Parse BOM references from the value (comma-separated) if value is provided
+      const bomReference = updates.value 
+        ? updates.value.split(',').map(ref => ref.trim()).filter(ref => ref.length > 0)
+        : requirement.source;
       
       // Call API to update requirement
       const result = await updateRequirement(
         sessionId,
         reqId,
-        requirement.description, // Keep original description, or could allow editing it too
-        requirement.category, // Keep original category, or could allow editing it too
+        updates.description || requirement.description,
+        requirement.category,
         bomReference
       );
 
@@ -117,6 +143,8 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
           req.id === reqId 
             ? { 
                 ...req, 
+                title: updates.title || req.title,
+                description: updates.description || req.description,
                 value: result.requirement.bom_reference.join(', '),
                 source: result.requirement.bom_reference,
                 isEditing: false
@@ -129,6 +157,8 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to update requirement';
       toast.error(errorMessage);
+    } finally {
+      setSavingRequirementId(null);
     }
   };
 
@@ -220,74 +250,40 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
 
   if (isGenerating) {
     return (
-      <div className="h-full overflow-y-auto p-8 bg-gradient-to-br from-gray-50 to-blue-50">
-        <div className="w-full max-w-2xl mx-auto">
-          {/* Header */}
+      <div className="h-full flex items-center justify-center p-8">
+        <div className="w-full max-w-2xl">
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center mb-8"
+            className="space-y-6"
           >
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 mb-6 shadow-lg">
-              <Loader2 className="h-10 w-10 text-white animate-spin" />
-            </div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-3">
-              Requirements Analysis Engine
-            </h2>
-            <p className="text-gray-600 text-lg">
-              Fetching requirements from API...
-            </p>
-          </motion.div>
-
-          {/* Progress Panel */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.2 }}
-            className="rounded-2xl border-2 border-gray-200 bg-white shadow-xl p-8"
-          >
-            {/* Loading Message */}
-            <div className="rounded-xl bg-blue-50 border-2 border-blue-200 p-6 mb-6">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">
-                  Loading Requirements
-                </span>
+            <div className="rounded-xl border border-gray-300 bg-gray-50 p-12 text-center transition-all">
+              <div className="space-y-4">
+                <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto" />
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Processing Requirements...
+                </h3>
+                <p className="text-gray-600 mb-6">
+                  AI is analyzing component specifications, datasheets, and design patterns to extract engineering requirements
+                </p>
               </div>
-              <p className="text-lg font-semibold text-gray-900">
-                Fetching requirements from API...
-              </p>
             </div>
 
-            {/* Stats Footer */}
-            <div className="grid grid-cols-2 gap-4 mt-6 pt-6 border-t border-gray-200">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-gray-900">
-                  <Loader2 className="h-6 w-6 animate-spin inline-block" />
+            {/* Engineering Note */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm text-gray-700"
+            >
+              <div className="flex items-start gap-3">
+                <Zap className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>OEM-Grade Analysis:</strong> AI engine cross-references component
+                  datasheets, power trees, and thermal models to extract design requirements with high confidence.
                 </div>
-                <div className="text-xs text-gray-600 mt-1">Loading Requirements</div>
               </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-gray-900">{categories.length}</div>
-                <div className="text-xs text-gray-600 mt-1">Categories</div>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Engineering Note */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-            className="mt-6 rounded-lg bg-gray-900 border border-gray-700 p-4 text-sm text-gray-300"
-          >
-            <div className="flex items-start gap-3">
-              <Zap className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-white">OEM-Grade Analysis:</strong> AI engine cross-references component
-                datasheets, power trees, and thermal models to extract design requirements with 90%+ confidence.
-              </div>
-            </div>
+            </motion.div>
           </motion.div>
         </div>
       </div>
@@ -297,44 +293,31 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
   return (
     <div className="h-full overflow-y-auto p-8">
       <div className="w-full max-w-6xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-8"
-        >
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            Engineering Requirements
-          </h1>
-          <p className="text-lg text-gray-600">
-            Review and validate AI-generated requirements from your BOM
-          </p>
-        </motion.div>
-
         <div className="grid grid-cols-2 gap-4 mb-8">
-          <div className="rounded-lg border-2 border-gray-200 bg-white p-6 text-center">
+          <div className="rounded-lg border border-gray-300 bg-white p-6 text-center">
             <div className="text-4xl font-bold text-gray-900">{requirements.length}</div>
             <div className="text-sm text-gray-600 mt-1">Total Requirements</div>
           </div>
-          <div className="rounded-lg border-2 border-blue-200 bg-blue-50 p-6 text-center">
+          <div className="rounded-lg border border-blue-300 bg-blue-50 p-6 text-center">
             <div className="text-4xl font-bold text-blue-600">{categories.length}</div>
             <div className="text-sm text-gray-600 mt-1">Categories</div>
           </div>
         </div>
 
-        <div className="rounded-2xl border-2 border-gray-200 bg-white p-8 mb-6">
+        <div className="rounded-xl border border-gray-300 bg-white p-6 mb-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-bold text-gray-900">Requirements by Category</h3>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white font-medium hover:bg-blue-600 flex items-center gap-2 transition-colors"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors"
               >
                 <Plus className="h-4 w-4" />
                 Create Custom
               </button>
               <button
                 onClick={() => setShowUploadModal(true)}
-                className="rounded-lg bg-purple-500 px-4 py-2 text-sm text-white font-medium hover:bg-purple-600 flex items-center gap-2 transition-colors"
+                className="rounded-lg bg-gray-700 px-4 py-2 text-sm text-white font-medium hover:bg-gray-800 flex items-center gap-2 transition-colors"
               >
                 <Upload className="h-4 w-4" />
                 Upload File
@@ -351,7 +334,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search requirements by title, description, value, or category..."
-                className="w-full pl-12 pr-12 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-400 focus:outline-none text-sm transition-colors"
+                className="w-full pl-12 pr-12 py-3 rounded-lg border border-gray-300 focus:border-blue-400 focus:outline-none text-sm transition-colors"
               />
               {searchQuery && (
                 <button
@@ -387,31 +370,36 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
               </button>
               {categories.map((category) => {
                 const count = requirements.filter(r => r.category === category).length;
-                const categoryIcons: Record<string, string> = {
-                  'Power Supply': '⚡',
-                  'Voltage Regulation': '📊',
-                  'Battery Management': '🔋',
-                  'Thermal Management': '🌡️',
-                  'Safety & Compliance': '🛡️',
-                  'Performance': '🚀',
-                  'Environmental': '🌍'
+                const categoryIcons: Record<string, JSX.Element> = {
+                  'Power Supply': <Zap className="h-4 w-4" />,
+                  'Voltage Regulation': <Gauge className="h-4 w-4" />,
+                  'Battery Management': <Battery className="h-4 w-4" />,
+                  'Thermal Management': <Thermometer className="h-4 w-4" />,
+                  'Safety & Compliance': <Shield className="h-4 w-4" />,
+                  'Performance': <Rocket className="h-4 w-4" />,
+                  'Environmental': <Globe className="h-4 w-4" />,
+                  'Power Regulation': <Gauge className="h-4 w-4" />,
+                  'Memory': <Cpu className="h-4 w-4" />,
+                  'Configuration': <Settings className="h-4 w-4" />,
+                  'Connectivity': <Globe className="h-4 w-4" />,
+                  'EMI Filtering': <Shield className="h-4 w-4" />
                 };
-                const icon = categoryIcons[category] || '📋';
+                const IconComponent = categoryIcons[category] || <Settings className="h-4 w-4" />;
                 
                 return (
                   <button
                     key={category}
                     onClick={() => setActiveTab(category)}
-                    className={`px-4 py-2 rounded-t-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    className={`px-4 py-2 rounded-t-lg text-sm font-medium transition-all whitespace-nowrap flex items-center gap-2 ${
                       activeTab === category
-                        ? 'bg-blue-500 text-white border-b-2 border-blue-600'
+                        ? 'bg-blue-600 text-white border-b-2 border-blue-700'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
                   >
-                    <span className="flex items-center gap-2">
-                      <span>{icon}</span>
-                      {category} ({count})
+                    <span className={activeTab === category ? 'text-white' : 'text-gray-600'}>
+                      {IconComponent}
                     </span>
+                    {category} ({count})
                   </button>
                 );
               })}
@@ -440,8 +428,9 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
                         key={req.id}
                         requirement={req}
                         onEdit={() => handleEdit(req.id)}
-                        onSaveEdit={(newValue) => handleSaveEdit(req.id, newValue)}
+                        onSaveEdit={(updates) => handleSaveEdit(req.id, updates)}
                         onCancelEdit={() => handleCancelEdit(req.id)}
+                        isSaving={savingRequirementId === req.id}
                       />
                     ))}
                   </div>
@@ -452,11 +441,10 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
 
           <button
             onClick={onRequirementsComplete}
-            className="w-full mt-6 rounded-xl px-6 py-5 font-bold text-lg transition-all flex items-center justify-center gap-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-xl hover:shadow-2xl transform hover:scale-[1.02] cursor-pointer"
+            className="w-full mt-6 rounded-lg px-4 py-2.5 text-sm font-medium transition-all flex items-center justify-center gap-2 bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
           >
-            <CheckCircle className="h-6 w-6" />
+            <CheckCircle className="h-4 w-4" />
             Continue to Architecture
-            <Zap className="h-6 w-6" />
           </button>
         </div>
 
@@ -641,220 +629,188 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
 interface RequirementCardProps {
   requirement: Requirement;
   onEdit: () => void;
-  onSaveEdit: (newValue: string) => void;
+  onSaveEdit: (updates: { title?: string; description?: string; value?: string }) => void;
   onCancelEdit: () => void;
+  isSaving?: boolean;
 }
 
-function RequirementCard({ requirement, onEdit, onSaveEdit, onCancelEdit }: RequirementCardProps) {
+function RequirementCard({ requirement, onEdit, onSaveEdit, onCancelEdit, isSaving = false }: RequirementCardProps) {
+  const [editTitle, setEditTitle] = useState(requirement.title);
+  const [editDescription, setEditDescription] = useState(requirement.description);
   const [editValue, setEditValue] = useState(requirement.value);
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Reset edit values when requirement changes or editing is cancelled
+  useEffect(() => {
+    if (!requirement.isEditing) {
+      setEditTitle(requirement.title);
+      setEditDescription(requirement.description);
+      setEditValue(requirement.value);
+    }
+  }, [requirement.isEditing, requirement.title, requirement.description, requirement.value]);
+
   const handleSave = () => {
-    onSaveEdit(editValue);
+    onSaveEdit({
+      title: editTitle,
+      description: editDescription,
+      value: editValue
+    });
   };
-
-  // Category icons and colors
-  const categoryConfig: Record<string, { icon: string; color: string; bgColor: string; borderColor: string }> = {
-    'Power Supply': { icon: '⚡', color: 'text-amber-700', bgColor: 'bg-amber-50', borderColor: 'border-amber-300' },
-    'Voltage Regulation': { icon: '📊', color: 'text-purple-700', bgColor: 'bg-purple-50', borderColor: 'border-purple-300' },
-    'Battery Management': { icon: '🔋', color: 'text-green-700', bgColor: 'bg-green-50', borderColor: 'border-green-300' },
-    'Thermal Management': { icon: '🌡️', color: 'text-red-700', bgColor: 'bg-red-50', borderColor: 'border-red-300' },
-    'Safety & Compliance': { icon: '🛡️', color: 'text-blue-700', bgColor: 'bg-blue-50', borderColor: 'border-blue-300' }
-  };
-
-  const config = categoryConfig[requirement.category] || { icon: '📋', color: 'text-gray-700', bgColor: 'bg-gray-50', borderColor: 'border-gray-300' };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.01, boxShadow: '0 8px 16px rgba(0,0,0,0.1)' }}
-      className={`rounded-xl border-2 overflow-hidden transition-all ${
-        requirement.isEditing
-          ? 'border-blue-400 bg-gradient-to-br from-blue-50 to-cyan-50 shadow-lg shadow-blue-100'
-          : 'border-gray-200 bg-white hover:border-gray-400 hover:shadow-md'
-      }`}
+    <div className={`rounded-lg border overflow-hidden transition-all ${
+      requirement.isEditing
+        ? 'border-blue-400 bg-blue-50'
+        : 'border-gray-300 bg-white hover:border-gray-400'
+    }`}
     >
       {/* Header Bar */}
-      <div className={`px-4 py-2 border-b ${
+      <div className={`px-4 py-3 border-b ${
         requirement.isEditing
-          ? 'bg-blue-100 border-blue-200'
+          ? 'bg-blue-100 border-blue-300'
           : 'bg-gray-50 border-gray-200'
       }`}>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">{config.icon}</span>
-            <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
-              {requirement.category}
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Confidence Badge */}
+          <span className="text-sm font-semibold text-gray-700">
+            {requirement.category}
+          </span>
+          {/* Action Buttons in Header - Right Side */}
+          {requirement.isEditing ? (
             <div className="flex items-center gap-2">
-              <div className="w-16 h-1.5 rounded-full bg-gray-200 overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${requirement.confidence}%` }}
-                  transition={{ duration: 0.8, delay: 0.2 }}
-                  className={`h-full rounded-full ${
-                    requirement.confidence >= 95 ? 'bg-green-500' :
-                    requirement.confidence >= 90 ? 'bg-blue-500' :
-                    'bg-yellow-500'
-                  }`}
-                />
-              </div>
-              <span className={`text-xs font-bold ${
-                requirement.confidence >= 95 ? 'text-green-600' :
-                requirement.confidence >= 90 ? 'text-blue-600' :
-                'text-yellow-600'
-              }`}>
-                {requirement.confidence}%
-              </span>
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs text-white font-medium hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3.5 w-3.5" />
+                    Save
+                  </>
+                )}
+              </button>
+              <button
+                onClick={onCancelEdit}
+                disabled={isSaving}
+                className="px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 font-medium hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all text-xs"
+              >
+                <X className="h-3.5 w-3.5" />
+                Cancel
+              </button>
             </div>
-          </div>
+          ) : (
+            <button
+              onClick={onEdit}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white font-medium hover:bg-blue-700 flex items-center gap-1.5 transition-all"
+            >
+              <Edit2 className="h-3.5 w-3.5" />
+              Edit
+            </button>
+          )}
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="p-5">
-        <div className="mb-4">
-          <h5 className="text-lg font-bold text-gray-900 mb-2">
-            {requirement.title}
-          </h5>
-          <p className="text-sm text-gray-600 leading-relaxed">{requirement.description}</p>
+      <div className="p-4 space-y-4">
+        {/* Title */}
+        <div>
+          {requirement.isEditing ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                Title
+              </label>
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="w-full rounded-lg border border-blue-300 px-3 py-2.5 text-sm font-semibold text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                placeholder="Requirement title..."
+              />
+            </div>
+          ) : (
+            <h5 className="text-base font-semibold text-gray-900">
+              {requirement.title}
+            </h5>
+          )}
+        </div>
+
+        {/* Description */}
+        <div>
+          {requirement.isEditing ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                Description
+              </label>
+              <textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                rows={3}
+                className="w-full rounded-lg border border-blue-300 px-3 py-2.5 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all"
+                placeholder="Requirement description..."
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600 leading-relaxed">{requirement.description}</p>
+          )}
         </div>
 
         {/* Value Display */}
-        {requirement.isEditing ? (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            className="mb-4"
-          >
-            <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">
-              Specification Value
-            </label>
-            <input
-              type="text"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              className="w-full rounded-lg border-2 border-blue-300 px-4 py-3 text-sm font-mono bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              placeholder="Enter requirement value..."
-              autoFocus
-            />
-          </motion.div>
-        ) : (
-          <div className={`rounded-lg border-2 p-4 mb-4 ${config.borderColor} ${config.bgColor}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                  Specification
-                </div>
-                <div className="text-base font-mono font-bold text-gray-900 leading-relaxed">
-                  {requirement.value}
-                </div>
+        <div>
+          {requirement.isEditing ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                Specification Value
+              </label>
+              <input
+                type="text"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                className="w-full rounded-lg border border-blue-300 px-3 py-2.5 text-sm font-mono bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                placeholder="Enter requirement value..."
+              />
+            </div>
+          ) : (
+            <div className="rounded-lg border border-gray-300 bg-gray-50 p-3">
+              <div className="text-xs font-medium text-gray-600 mb-1">
+                Specification
               </div>
-              {!requirement.isEditing && (
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={onEdit}
-                  className="rounded-lg bg-blue-500 p-2 text-white hover:bg-blue-600 transition-colors"
-                  title="Edit value"
-                >
-                  <Edit2 className="h-3.5 w-3.5" />
-                </motion.button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Source Components */}
-        <div className="mb-4">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-900 transition-colors mb-2"
-          >
-            <span>SOURCE COMPONENTS ({requirement.source.length})</span>
-            <motion.div
-              animate={{ rotate: isExpanded ? 180 : 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              ▼
-            </motion.div>
-          </button>
-          <motion.div
-            initial={false}
-            animate={{ height: isExpanded ? 'auto' : 0, opacity: isExpanded ? 1 : 0 }}
-            transition={{ duration: 0.3 }}
-            className="overflow-hidden"
-          >
-            <div className="flex flex-wrap gap-2 pt-1">
-              {requirement.source.map((src, idx) => (
-                <motion.span
-                  key={idx}
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: idx * 0.05 }}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  className="rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-1.5 text-xs text-white font-semibold shadow-sm cursor-pointer"
-                >
-                  {src}
-                </motion.span>
-              ))}
-            </div>
-          </motion.div>
-          {!isExpanded && (
-            <div className="flex gap-1">
-              {requirement.source.slice(0, 3).map((_src, idx) => (
-                <div
-                  key={idx}
-                  className="h-1.5 w-8 rounded-full bg-blue-200"
-                />
-              ))}
-              {requirement.source.length > 3 && (
-                <div className="h-1.5 w-4 rounded-full bg-gray-200" />
-              )}
+              <div className="text-sm font-mono text-gray-900">
+                {requirement.value}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
-          {requirement.isEditing ? (
-            <>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSave}
-                className="flex-1 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 px-4 py-3 text-sm text-white font-bold hover:from-green-600 hover:to-emerald-700 flex items-center justify-center gap-2 shadow-md"
-              >
-                <Check className="h-4 w-4" />
-                Save Changes
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={onCancelEdit}
-                className="px-4 py-3 rounded-lg bg-gray-200 text-gray-700 font-bold hover:bg-gray-300 flex items-center justify-center gap-2 transition-all"
-              >
-                <X className="h-4 w-4" />
-                Cancel
-              </motion.button>
-            </>
-          ) : (
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={onEdit}
-              className="flex-1 rounded-lg bg-blue-500 px-4 py-3 text-sm text-white font-bold hover:bg-blue-600 flex items-center justify-center gap-2 shadow-md transition-all"
-            >
-              <Edit2 className="h-4 w-4" />
-              Edit Requirement
-            </motion.button>
+        {/* Source Components */}
+        <div className="mb-0">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-2 text-xs font-medium text-gray-600 hover:text-gray-900 transition-colors mb-2"
+          >
+            <span>Source Components ({requirement.source.length})</span>
+            <span className={`transform transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+              ▼
+            </span>
+          </button>
+          {isExpanded && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {requirement.source.map((src, idx) => (
+                <span
+                  key={idx}
+                  className="rounded-lg bg-blue-600 px-2 py-1 text-xs text-white font-medium"
+                >
+                  {src}
+                </span>
+              ))}
+            </div>
           )}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

@@ -4,7 +4,7 @@ import { CheckCircle, Loader2, AlertCircle, Check, Search, X } from 'lucide-reac
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { validateParts, type ValidationResult } from '@/app/services/api';
+import { validateParts, getValidationResults, type ValidationResult } from '@/app/services/api';
 
 interface ValidationViewProps {
   components: Component[];
@@ -37,7 +37,21 @@ export function ValidationView({ components: _components, onValidationComplete }
       setError(null);
 
       try {
-        const result = await validateParts(sessionId);
+        // Try GET first, fallback to POST if 404
+        let result;
+        try {
+          result = await getValidationResults(sessionId);
+          console.log('Got validation results from GET endpoint');
+        } catch (getError: any) {
+          // If 404, try POST to generate validation
+          if (getError.message?.includes('404') || getError.message?.includes('Failed to get validation results: 404')) {
+            console.log('Validation results not found, generating...');
+            result = await validateParts(sessionId);
+            console.log('Generated validation results from POST endpoint');
+          } else {
+            throw getError;
+          }
+        }
         
         if (!result.success) {
           throw new Error('Validation request was not successful');
@@ -99,57 +113,46 @@ export function ValidationView({ components: _components, onValidationComplete }
     onValidationComplete(validatedComponents);
   };
 
-  return (
-    <div className="h-full overflow-y-auto p-8">
-      <div className="w-full max-w-6xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-8"
-        >
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            Part Validation
-          </h1>
-          <p className="text-lg text-gray-600">
-            Validate parts against component databases
-          </p>
-        </motion.div>
-
-        {/* Loading State */}
-        {isValidating && (
+  // Show centered loader when validating (like upload page)
+  if (isValidating) {
+    return (
+      <div className="h-full flex items-center justify-center p-8">
+        <div className="w-full max-w-2xl">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-2xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-purple-50 p-12 mb-8"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-6"
           >
-            <div className="flex flex-col items-center justify-center space-y-6">
-              <div className="relative">
-                <Loader2 className="h-16 w-16 text-blue-500 animate-spin" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Check className="h-8 w-8 text-blue-600" />
-                </div>
-              </div>
-              <div className="text-center">
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                  Validating Parts
+            <div className="rounded-xl border border-gray-300 bg-gray-50 p-12 text-center transition-all">
+              <div className="space-y-4">
+                <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto" />
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Validating Parts...
                 </h3>
-                <p className="text-lg text-gray-600">
-                  Checking parts against component databases...
+                <p className="text-gray-600 mb-6">
+                  Checking parts against component databases
                 </p>
               </div>
             </div>
           </motion.div>
-        )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-y-auto p-8">
+      <div className="w-full max-w-6xl mx-auto">
 
         {/* Error State */}
         {error && !isValidating && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-2xl border-2 border-red-200 bg-red-50 p-12 mb-8"
+            className="rounded-xl border border-gray-300 bg-white p-12 mb-8"
           >
             <div className="flex flex-col items-center justify-center space-y-4">
-              <AlertCircle className="h-16 w-16 text-red-500" />
+              <AlertCircle className="h-16 w-16 text-gray-400" />
               <div className="text-center">
                 <h3 className="text-2xl font-bold text-gray-900 mb-2">
                   Unable to Validate Parts
@@ -171,45 +174,43 @@ export function ValidationView({ components: _components, onValidationComplete }
 
             {/* Stats Cards */}
             <div className="grid grid-cols-4 gap-4 mb-8">
-          <div className="rounded-lg border-2 border-gray-200 bg-white p-6 text-center">
+              <div className="rounded-lg border border-gray-300 bg-white p-6 text-center">
                 <div className="text-4xl font-bold text-gray-900">{validationData.total_parts}</div>
                 <div className="text-sm text-gray-600 mt-1">Total Parts</div>
-          </div>
-          <div className="rounded-lg border-2 border-green-200 bg-green-50 p-6 text-center">
-                <div className="text-4xl font-bold text-green-600">{validationData.valid_parts}</div>
-                <div className="text-sm text-gray-600 mt-1">Valid Parts</div>
               </div>
-              <div className="rounded-lg border-2 border-red-200 bg-red-50 p-6 text-center">
-                <div className="text-4xl font-bold text-red-600">{validationData.invalid_parts}</div>
+              <div className="rounded-lg border border-green-300 bg-green-50 p-6 text-center">
+                <div className="text-4xl font-bold text-green-600">{validationData.valid_parts}</div>
+                <div className="text-sm text-gray-700 mt-1">Valid Parts</div>
+              </div>
+              <div className="rounded-lg border border-gray-300 bg-gray-50 p-6 text-center">
+                <div className="text-4xl font-bold text-gray-700">{validationData.invalid_parts}</div>
                 <div className="text-sm text-gray-600 mt-1">Invalid Parts</div>
-          </div>
-              <div className="rounded-lg border-2 border-blue-200 bg-blue-50 p-6 text-center">
+              </div>
+              <div className="rounded-lg border border-blue-300 bg-blue-50 p-6 text-center">
                 <div className="text-4xl font-bold text-blue-600">{validationData.auxiliary_parts_skipped}</div>
-                <div className="text-sm text-gray-600 mt-1">Auxiliary Skipped</div>
-          </div>
-        </div>
+                <div className="text-sm text-gray-700 mt-1">Auxiliary Skipped</div>
+              </div>
+            </div>
 
-        <div className="rounded-2xl border-2 border-gray-200 bg-white p-8 mb-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Validation Results</h3>
-          
+        <div className="rounded-xl border border-gray-300 bg-white p-6 mb-6">
           {/* Search Bar and Filter Toggle */}
           <div className="mb-6 space-y-3">
             {/* Search Bar */}
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
               <input
                 type="text"
-                    placeholder="Search by MPN or message..."
+                placeholder="Search by MPN or message..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none transition-colors text-sm"
+                className="w-full pl-12 pr-12 py-3 rounded-lg border border-gray-300 focus:border-blue-400 focus:outline-none transition-colors text-sm"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
-                      <X className="h-4 w-4" />
+                  <X className="h-5 w-5" />
                 </button>
               )}
             </div>
@@ -221,33 +222,33 @@ export function ValidationView({ components: _components, onValidationComplete }
                 onClick={() => setFilterMode('all')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   filterMode === 'all'
-                    ? 'bg-blue-500 text-white shadow-sm'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                    All ({validationData.total_parts})
+                All ({validationData.total_parts})
               </button>
               <button
-                    onClick={() => setFilterMode('valid')}
+                onClick={() => setFilterMode('valid')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      filterMode === 'valid'
-                    ? 'bg-green-500 text-white shadow-sm'
+                  filterMode === 'valid'
+                    ? 'bg-green-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
                 <CheckCircle className="h-4 w-4 inline mr-1" />
-                    Valid ({validationData.valid_parts})
+                Valid ({validationData.valid_parts})
               </button>
               <button
-                    onClick={() => setFilterMode('invalid')}
+                onClick={() => setFilterMode('invalid')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      filterMode === 'invalid'
-                        ? 'bg-red-500 text-white shadow-sm'
+                  filterMode === 'invalid'
+                    ? 'bg-gray-700 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                    <X className="h-4 w-4 inline mr-1" />
-                    Invalid ({validationData.invalid_parts})
+                <X className="h-4 w-4 inline mr-1" />
+                Invalid ({validationData.invalid_parts})
               </button>
             </div>
 
@@ -277,10 +278,10 @@ export function ValidationView({ components: _components, onValidationComplete }
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: idx * 0.05 }}
-                        className={`rounded-xl border-2 p-6 transition-all hover:shadow-lg ${
+                        className={`rounded-lg border p-6 transition-all ${
                           isValid
                             ? 'border-green-300 bg-white hover:border-green-400'
-                            : 'border-red-300 bg-white hover:border-red-400'
+                            : 'border-gray-300 bg-white hover:border-gray-400'
                         }`}
                       >
                         <div className="space-y-4">
@@ -303,10 +304,10 @@ export function ValidationView({ components: _components, onValidationComplete }
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-3 mb-3 flex-wrap">
                                 <h3 className="font-bold text-xl text-gray-900">{result.mpn}</h3>
-                                <span className={`px-3 py-1.5 rounded-full text-xs font-bold ${
+                                <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
                                   isValid
-                                    ? 'bg-green-500 text-white'
-                                    : 'bg-red-500 text-white'
+                                    ? 'bg-green-600 text-white'
+                                    : 'bg-gray-600 text-white'
                                 }`}>
                                   {result.status.toUpperCase()}
                                 </span>
@@ -419,10 +420,10 @@ export function ValidationView({ components: _components, onValidationComplete }
               {/* Proceed Button */}
               <button
                 onClick={handleProceed}
-                className="w-full rounded-lg bg-blue-500 px-6 py-4 text-white font-medium hover:bg-blue-600 flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-xl"
+                className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-3.5 text-white font-semibold hover:from-blue-700 hover:to-blue-800 active:scale-[0.98] flex items-center justify-center gap-2.5 transition-all duration-200 shadow-lg hover:shadow-xl"
               >
                 <CheckCircle className="h-5 w-5" />
-                Proceed to Next Step
+                <span>Proceed to Next Step</span>
               </button>
             </div>
               </>

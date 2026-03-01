@@ -15,26 +15,27 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'complete' | 'in-progress'>('all');
 
-  // Unused helper functions kept for potential future use
-  // @ts-expect-error - unused but kept for future use
-  const getStageLabel = (_stage: string) => {
+  const getStageLabel = (stage: string) => {
     const labels: Record<string, string> = {
       upload: 'Upload',
       discovery: 'Discovery',
       identify: 'Identification',
       fundamental: 'Classification',
+      analysis: 'Analysis',
+      validate: 'Validation',
       architecture: 'Architecture',
       requirements: 'Requirements',
       subsystems: 'Subsystems',
       compliance: 'Compliance Analysis',
+      review: 'Review',
     };
-    return labels[_stage] || _stage;
+    return labels[stage] || stage;
   };
 
-  // @ts-expect-error - unused but kept for future use
-  const getStageProgress = (_stage: string) => {
-    const stages = ['upload', 'discovery', 'identify', 'fundamental', 'architecture', 'requirements', 'subsystems', 'compliance'];
-    const currentIndex = stages.indexOf(_stage);
+  const getStageProgress = (stage: string) => {
+    const stages = ['upload', 'fundamental', 'analysis', 'validate', 'architecture', 'requirements', 'subsystems', 'compliance', 'review'];
+    const currentIndex = stages.indexOf(stage);
+    if (currentIndex === -1) return 0;
     return ((currentIndex + 1) / stages.length) * 100;
   };
 
@@ -165,14 +166,14 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
       {/* BOM List */}
       <main className="flex-1 overflow-auto px-8 py-6">
         <div className="max-w-7xl mx-auto">
-          {filteredSessions.filter(session => isComplete(session)).length === 0 ? (
+          {filteredSessions.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
               <div className="rounded-full bg-gray-100 p-6 mb-4">
                 <FileText className="h-12 w-12 text-gray-400" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">No completed BOMs found</h3>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No BOMs found</h3>
               <p className="text-gray-600 mb-6">
-                {searchQuery ? 'No completed BOMs match your search' : 'Complete your first BOM workflow to see it here'}
+                {searchQuery ? 'No BOMs match your search' : 'Upload your first BOM to get started'}
               </p>
               {!searchQuery && (
                 <Button onClick={onNewBOM} size="lg" className="gap-2">
@@ -183,7 +184,9 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
             </div>
           ) : (
             <div className="grid gap-4">
-              {filteredSessions.filter(session => isComplete(session)).map((session) => {
+              {filteredSessions.map((session) => {
+                const complete = isComplete(session);
+                const progress = complete ? 100 : getStageProgress(session.stage);
                 
                 return (
                   <button
@@ -201,10 +204,17 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
                             <h3 className="text-xl font-bold text-gray-900 group-hover:text-blue-600 transition-colors">
                               {session.name}
                             </h3>
-                            <Badge className="bg-green-100 text-green-700 border-green-200">
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
-                              Complete
-                            </Badge>
+                            {complete ? (
+                              <Badge className="bg-green-100 text-green-700 border-green-200">
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                                Complete
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">
+                                <Clock className="h-3 w-3 mr-1" />
+                                {getStageLabel(session.stage)}
+                              </Badge>
+                            )}
                           </div>
                           
                           <div className="flex items-center gap-4 text-sm text-gray-600">
@@ -244,24 +254,28 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
                         </div>
                       </div>
                       
-                      {/* Progress Bar - Always 100% for completed BOMs */}
+                      {/* Progress Bar */}
                       <div className="space-y-2">
                         <div className="flex items-center justify-between text-sm">
                           <span className="font-medium text-gray-700">
-                            Workflow Complete
+                            {complete ? 'Workflow Complete' : `Stage: ${getStageLabel(session.stage)}`}
                           </span>
-                          <span className="text-gray-600">100%</span>
+                          <span className="text-gray-600">{Math.round(progress)}%</span>
                         </div>
                         <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-500"
-                            style={{ width: '100%' }}
+                            className={`h-full transition-all duration-500 ${
+                              complete
+                                ? 'bg-gradient-to-r from-green-500 to-emerald-500'
+                                : 'bg-gradient-to-r from-blue-500 to-blue-600'
+                            }`}
+                            style={{ width: `${progress}%` }}
                           />
                         </div>
                       </div>
                       
-                      {/* Compliance Info */}
-                      {session.complianceScore !== undefined && (
+                      {/* Compliance Info - Only show for completed sessions */}
+                      {complete && session.complianceScore !== undefined && (
                         <div className="mt-4 flex items-center gap-4 pt-4 border-t border-gray-100">
                           <div className="flex items-center gap-2 text-sm">
                             <CheckCircle2 className="h-4 w-4 text-green-600" />

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import type { Component } from '@/app/types';
-import { CheckCircle, Cpu, Zap, AlertCircle, Info, Loader2, Search, X } from 'lucide-react';
+import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { classifyParts, updateClassification } from '@/app/services/api';
+import { classifyParts, getClassification, updateClassification } from '@/app/services/api';
 
 interface FundamentalClassificationViewProps {
   components: Component[];
@@ -45,7 +45,31 @@ export function FundamentalClassificationView({
       setCurrentClassifying(0);
       
       try {
-        const classificationResult = await classifyParts(sessionId);
+        // Try GET first, fallback to POST if 404 or if all values are null
+        let classificationResult;
+        try {
+          classificationResult = await getClassification(sessionId);
+          console.log('Got classification from GET endpoint');
+          
+          // Check if classification_map has all null values (classification not done yet)
+          const classificationMap = classificationResult.classification_map || {};
+          const allValuesNull = Object.values(classificationMap).every(value => value === null);
+          
+          if (allValuesNull && Object.keys(classificationMap).length > 0) {
+            console.log('Classification map has all null values, triggering classification...');
+            classificationResult = await classifyParts(sessionId);
+            console.log('Generated classification from POST endpoint');
+          }
+        } catch (getError: any) {
+          // If 404, try POST to generate classification
+          if (getError.message?.includes('404') || getError.message?.includes('Failed to get classification: 404')) {
+            console.log('Classification not found, generating...');
+            classificationResult = await classifyParts(sessionId);
+            console.log('Generated classification from POST endpoint');
+          } else {
+            throw getError;
+          }
+        }
         
         if (!classificationResult.success) {
           throw new Error('Classification request was not successful');
@@ -67,13 +91,20 @@ export function FundamentalClassificationView({
         const createdComponents: Component[] = classificationEntries.map(
           ([partNumber, classification], index) => {
             // Use only API data - part_number from classification_map
+            // Handle null classification (not classified yet)
+            const isFundamental = classification === null 
+              ? undefined 
+              : classification === 'non-auxiliary' 
+                ? true 
+                : false;
+            
             const component = {
               id: `comp-${partNumber}-${index}`,
               reference: partNumber, // Use part_number from API as reference
               partNumber: partNumber, // From classification_map
               description: partNumber, // Use part_number as description
               type: 'IC',
-              isFundamental: classification === 'non-auxiliary' ? true : false, // From classification_map
+              isFundamental: isFundamental, // From classification_map (can be undefined if null)
               isIdentified: true,
               isGeneric: false,
               complianceStatus: 'unknown' as const,
@@ -124,7 +155,21 @@ export function FundamentalClassificationView({
 
   const handleClassify = async (componentId: string, isFundamental: boolean) => {
     const component = localComponents.find((c) => c.id === componentId);
-    if (!component || !component.partNumber || !sessionId) {
+    
+    // Validate component and partNumber
+    if (!component) {
+      toast.error('Component not found');
+      return;
+    }
+    
+    if (!component.partNumber || component.partNumber.trim() === '') {
+      toast.error('Part number is missing or invalid');
+      console.error('Component missing partNumber:', component);
+      return;
+    }
+    
+    if (!sessionId) {
+      toast.error('Session ID is missing');
       return;
     }
 
@@ -152,8 +197,10 @@ export function FundamentalClassificationView({
     setUpdatingComponents((prev) => new Set(prev).add(componentId));
 
     try {
-      // Call API to update classification
-      const result = await updateClassification(sessionId, component.partNumber, newClassification);
+      // Call API to update classification - use trimmed partNumber
+      const mpn = component.partNumber.trim();
+      console.log('Updating classification:', { mpn, newClassification, sessionId });
+      const result = await updateClassification(sessionId, mpn, newClassification);
 
       // Update stats from API response
       if (result.statistics && classificationStats) {
@@ -216,6 +263,48 @@ export function FundamentalClassificationView({
   const filteredFundamental = filterComponents(fundamentalComponents);
   const filteredAuxiliary = filterComponents(auxiliaryComponents);
 
+  // Show centered loader when classifying (like upload page)
+  if (isClassifying) {
+    return (
+      <div className="h-full flex items-center justify-center p-8">
+        <div className="w-full max-w-2xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-6"
+          >
+            <div className="rounded-xl border border-gray-300 bg-gray-50 p-12 text-center transition-all">
+              <div className="space-y-4">
+                <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto" />
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Processing Classification...
+                </h3>
+                <p className="text-gray-600 mb-6">
+                  Classifying {currentClassifying} of {classificationStats?.total_parts || '...'} parts
+                </p>
+                {classificationStats && (
+                  <div className="w-full max-w-md mx-auto">
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden mb-2">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${classifyProgress}%` }}
+                        transition={{ duration: 0.3 }}
+                        className="h-full bg-blue-500"
+                      />
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      {Math.round(classifyProgress)}% complete
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full overflow-y-auto p-8">
       <div className="w-full max-w-6xl mx-auto">
@@ -224,71 +313,24 @@ export function FundamentalClassificationView({
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-8"
         >
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
+          {/* <h1 className="text-4xl font-bold text-gray-900 mb-2">
             Component Classification
           </h1>
           <p className="text-lg text-gray-600">
             Classify components as <strong>Fundamental (Essential)</strong> or{' '}
             <strong>Auxiliary (Non-Essential)</strong>
-          </p>
+          </p> */}
         </motion.div>
-
-        {/* Classification Loading State */}
-        {isClassifying && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-2xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-purple-50 p-12 mb-8"
-          >
-            <div className="flex flex-col items-center justify-center space-y-6">
-              <div className="relative">
-                <Loader2 className="h-16 w-16 text-blue-500 animate-spin" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Zap className="h-8 w-8 text-blue-600" />
-                </div>
-              </div>
-              
-              <div className="text-center">
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                  AI Classification in Progress
-                </h3>
-                <p className="text-lg text-gray-600">
-                  Classifying {currentClassifying} of {classificationStats?.total_parts || '...'} parts...
-                </p>
-                {classificationStats && (
-                  <p className="text-sm text-gray-500 mt-1">
-                    Processing {classificationStats.total_parts} parts from BOM
-                  </p>
-                )}
-              </div>
-
-              <div className="w-full max-w-md">
-                <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${classifyProgress}%` }}
-                    transition={{ duration: 0.3 }}
-                    className="h-full bg-gradient-to-r from-blue-500 to-purple-500"
-                  />
-                </div>
-                <div className="flex items-center justify-between mt-2 text-sm text-gray-600">
-                  <span>Analyzing component types and functions</span>
-                  <span className="font-medium">{Math.round(classifyProgress)}%</span>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
 
         {/* Error State */}
         {error && !isClassifying && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-2xl border-2 border-red-200 bg-red-50 p-12 mb-8"
+            className="rounded-xl border border-gray-300 bg-white p-12 mb-8"
           >
             <div className="flex flex-col items-center justify-center space-y-4">
-              <AlertCircle className="h-16 w-16 text-red-500" />
+              <AlertCircle className="h-16 w-16 text-gray-400" />
               <div className="text-center">
                 <h3 className="text-2xl font-bold text-gray-900 mb-2">
                   Unable to Load Classification
@@ -309,30 +351,30 @@ export function FundamentalClassificationView({
           <>
             {/* Summary Cards */}
             <div className="grid grid-cols-3 gap-4 mb-8">
-              <div className="rounded-lg border-2 border-blue-200 bg-blue-50 p-6 text-center">
+              <div className="rounded-lg border border-blue-300 bg-blue-50 p-6 text-center">
                 <div className="text-4xl font-bold text-blue-600">
                   {classificationStats?.non_auxiliary_parts ?? fundamentalComponents.length}
                 </div>
-                <div className="text-sm text-gray-600 mt-1">Fundamental (Non-Auxiliary)</div>
+                <div className="text-sm text-gray-700 mt-1">Fundamental (Non-Auxiliary)</div>
                 {classificationStats && (
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs text-gray-600 mt-1">
                     {classificationStats.total_parts} total parts
                   </div>
                 )}
               </div>
-              <div className="rounded-lg border-2 border-purple-200 bg-purple-50 p-6 text-center">
-                <div className="text-4xl font-bold text-purple-600">
+              <div className="rounded-lg border border-gray-300 bg-gray-50 p-6 text-center">
+                <div className="text-4xl font-bold text-gray-700">
                   {classificationStats?.auxiliary_parts ?? auxiliaryComponents.length}
                 </div>
-                <div className="text-sm text-gray-600 mt-1">Auxiliary</div>
+                <div className="text-sm text-gray-700 mt-1">Auxiliary</div>
                 {classificationStats && (
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs text-gray-600 mt-1">
                     {Math.round((classificationStats.auxiliary_parts / classificationStats.total_parts) * 100)}% of total
                   </div>
                 )}
               </div>
-              <div className="rounded-lg border-2 border-yellow-200 bg-yellow-50 p-6 text-center">
-                <div className="text-4xl font-bold text-yellow-600">
+              <div className="rounded-lg border border-gray-300 bg-white p-6 text-center">
+                <div className="text-4xl font-bold text-gray-900">
                   {unclassifiedComponents.length}
                 </div>
                 <div className="text-sm text-gray-600 mt-1">Unclassified</div>
@@ -344,35 +386,10 @@ export function FundamentalClassificationView({
               </div>
             </div>
 
-            {/* Info Box */}
-            <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 mb-6 flex items-start gap-3">
-              <Info className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-blue-800">
-                <strong>Fundamental Components:</strong> Core components critical to primary
-                functionality (e.g., MCU, power regulators, sensors).
-                <br />
-                <strong>Auxiliary Components:</strong> Supporting components that enhance but aren't
-                essential (e.g., status LEDs, debug interfaces, optional features).
-              </div>
-            </div>
-
             {/* Component List */}
-            <div className="rounded-2xl border-2 border-gray-200 bg-white p-8 mb-6">
-              <div className="flex items-start justify-between mb-6">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">AI Classification Complete</h3>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Click any component to move it between categories
-                  </p>
-                </div>
-                <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-1.5 text-xs text-green-800 font-medium flex items-center gap-1">
-                  <CheckCircle className="h-3 w-3" />
-                  Ready to Proceed
-                </div>
-              </div>
-
+            <div className="rounded-xl border border-gray-300 bg-white p-6 mb-6">
               {/* Search Bar */}
-              <div className="mb-6">
+              <div className="mb-4">
                 <div className="relative">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                   <input
@@ -380,7 +397,7 @@ export function FundamentalClassificationView({
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search components by reference, part number, type, or description..."
-                    className="w-full pl-12 pr-12 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-400 focus:outline-none text-sm transition-colors"
+                    className="w-full pl-12 pr-12 py-3 rounded-lg border border-gray-300 focus:border-blue-400 focus:outline-none text-sm transition-colors"
                   />
                   {searchQuery && (
                     <button
@@ -398,21 +415,34 @@ export function FundamentalClassificationView({
                 )}
               </div>
 
+              {/* Status Messages */}
+              {allClassified && (
+                <div className="mb-4 space-y-2">
+                  <div className="flex items-center gap-2 text-xs text-green-700">
+                    <CheckCircle className="h-3 w-3 text-green-600" />
+                    <span>
+                      <strong>All Set!</strong> AI has classified all {localComponents.length} components. Review below if needed, or proceed directly to System Architecture.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-green-700">
+                    <CheckCircle className="h-3 w-3 text-green-600" />
+                    <span>
+                      <strong>Classification Complete!</strong> {fundamentalComponents.length} fundamental components will be used for system architecture. {auxiliaryComponents.length} auxiliary components will be tracked separately.
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Two-Pane Layout */}
-              <div className="grid grid-cols-2 gap-6 mb-6">
+              <div className="grid grid-cols-2 gap-4 mb-4">
                 {/* Left Pane: Fundamental Components */}
-                <div className="rounded-xl border-2 border-blue-300 bg-gradient-to-br from-blue-50 to-blue-100 p-4">
-                  <div className="flex items-center justify-between mb-4 pb-3 border-b-2 border-blue-300">
+                <div className="rounded-lg border border-blue-300 bg-blue-50 p-3">
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-blue-300">
                     <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center">
-                        <Cpu className="h-4 w-4 text-white" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-gray-900">Fundamental</h4>
-                        <p className="text-xs text-gray-600">Core functionality</p>
-                      </div>
+                      <Cpu className="h-4 w-4 text-blue-600" />
+                      <h4 className="font-semibold text-gray-900">Fundamental</h4>
                     </div>
-                    <div className="text-2xl font-bold text-blue-600">
+                    <div className="text-lg font-bold text-blue-600">
                       {fundamentalComponents.length}
                     </div>
                   </div>
@@ -435,32 +465,23 @@ export function FundamentalClassificationView({
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
                             onClick={() => !isUpdating && handleClassify(comp.id, false)}
-                            className={`bg-white border-2 rounded-lg p-3 transition-all group ${
+                            className={`bg-white border border-blue-300 rounded p-2 transition-all group ${
                               isUpdating
-                                ? 'border-blue-400 cursor-wait opacity-60'
-                                : 'border-blue-200 cursor-pointer hover:border-blue-400 hover:shadow-md'
+                                ? 'cursor-wait opacity-60'
+                                : 'cursor-pointer hover:border-blue-500'
                             }`}
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                {comp.partNumber && (
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-sm text-blue-600 font-mono bg-blue-100 px-2 py-0.5 rounded font-semibold">
-                                      {comp.partNumber}
-                                    </span>
-                                    {isUpdating && (
-                                      <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              <div className={`text-xs transition-colors whitespace-nowrap ${
-                                isUpdating
-                                  ? 'text-blue-500'
-                                  : 'text-gray-400 group-hover:text-purple-500'
-                              }`}>
-                                {isUpdating ? 'Updating...' : 'Move →'}
-                              </div>
+                            <div className="flex items-center justify-between gap-2">
+                              {comp.partNumber && (
+                                <span className="text-sm text-blue-700 font-mono bg-blue-50 border border-blue-300 px-2 py-1 rounded font-medium">
+                                  {comp.partNumber}
+                                </span>
+                              )}
+                              {isUpdating ? (
+                                <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />
+                              ) : (
+                                <span className="text-xs text-gray-500 group-hover:text-blue-600">Move →</span>
+                              )}
                             </div>
                           </motion.div>
                         );
@@ -470,18 +491,13 @@ export function FundamentalClassificationView({
                 </div>
 
                 {/* Right Pane: Auxiliary Components */}
-                <div className="rounded-xl border-2 border-purple-300 bg-gradient-to-br from-purple-50 to-purple-100 p-4">
-                  <div className="flex items-center justify-between mb-4 pb-3 border-b-2 border-purple-300">
+                <div className="rounded-lg border border-gray-300 bg-gray-50 p-3">
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-300">
                     <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-purple-500 flex items-center justify-center">
-                        <Zap className="h-4 w-4 text-white" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-gray-900">Auxiliary</h4>
-                        <p className="text-xs text-gray-600">Supporting components</p>
-                      </div>
+                      <Zap className="h-4 w-4 text-gray-600" />
+                      <h4 className="font-semibold text-gray-900">Auxiliary</h4>
                     </div>
-                    <div className="text-2xl font-bold text-purple-600">
+                    <div className="text-lg font-bold text-gray-700">
                       {auxiliaryComponents.length}
                     </div>
                   </div>
@@ -504,32 +520,23 @@ export function FundamentalClassificationView({
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
                             onClick={() => !isUpdating && handleClassify(comp.id, true)}
-                            className={`bg-white border-2 rounded-lg p-3 transition-all group ${
+                            className={`bg-white border border-gray-300 rounded p-2 transition-all group ${
                               isUpdating
-                                ? 'border-purple-400 cursor-wait opacity-60'
-                                : 'border-purple-200 cursor-pointer hover:border-purple-400 hover:shadow-md'
+                                ? 'cursor-wait opacity-60'
+                                : 'cursor-pointer hover:border-gray-400'
                             }`}
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className={`text-xs transition-colors whitespace-nowrap ${
-                                isUpdating
-                                  ? 'text-purple-500'
-                                  : 'text-gray-400 group-hover:text-blue-500'
-                              }`}>
-                                {isUpdating ? 'Updating...' : '← Move'}
-                              </div>
-                              <div className="flex-1 min-w-0 text-right">
-                                {comp.partNumber && (
-                                  <div className="flex items-center justify-end gap-2 mb-1">
-                                    {isUpdating && (
-                                      <Loader2 className="h-3 w-3 text-purple-500 animate-spin" />
-                                    )}
-                                    <span className="text-sm text-purple-600 font-mono bg-purple-100 px-2 py-0.5 rounded font-semibold">
-                                      {comp.partNumber}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
+                            <div className="flex items-center justify-between gap-2">
+                              {isUpdating ? (
+                                <Loader2 className="h-3 w-3 text-gray-500 animate-spin" />
+                              ) : (
+                                <span className="text-xs text-gray-500 group-hover:text-gray-700">← Move</span>
+                              )}
+                              {comp.partNumber && (
+                                <span className="text-sm text-gray-700 font-mono bg-gray-50 border border-gray-300 px-2 py-1 rounded font-medium">
+                                  {comp.partNumber}
+                                </span>
+                              )}
                             </div>
                           </motion.div>
                         );
@@ -539,65 +546,25 @@ export function FundamentalClassificationView({
                 </div>
               </div>
 
-              {/* Info message - Optional review */}
-              {allClassified ? (
-                <div className="rounded-lg bg-green-50 border border-green-200 p-3 mb-4 text-sm">
-                  <div className="flex items-center gap-2 text-green-800">
-                    <CheckCircle className="h-4 w-4" />
-                    <span>
-                      <strong>All Set!</strong> AI has classified all {localComponents.length} components. Review above if needed, or proceed directly to System Architecture.
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-lg bg-yellow-50 border border-yellow-300 p-3 mb-4 text-sm">
-                  <div className="flex items-center gap-2 text-yellow-800">
-                    <AlertCircle className="h-4 w-4" />
-                    <span>
-                      <strong>Action Required:</strong> Please classify all{' '}
-                      {unclassifiedComponents.length} remaining component(s) before proceeding.
-                    </span>
-                  </div>
-                </div>
-              )}
-
               {/* Proceed Button - Always enabled if all classified */}
               <button
                 onClick={handleProceed}
                 disabled={!allClassified}
-                className="w-full rounded-lg bg-blue-500 px-6 py-4 text-white font-bold text-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-xl"
+                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-white font-medium text-sm hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
               >
                 {!allClassified ? (
                   <>
-                    <AlertCircle className="h-5 w-5" />
+                    <AlertCircle className="h-4 w-4" />
                     Classify {unclassifiedComponents.length} component(s) first
                   </>
                 ) : (
                   <>
-                    <CheckCircle className="h-6 w-6" />
-                    Apply Classification ({fundamentalComponents.length} Fundamental, {auxiliaryComponents.length} Auxiliary)
+                    <CheckCircle className="h-4 w-4" />
+                    Apply Classification
                   </>
                 )}
               </button>
             </div>
-
-            {/* Summary Stats */}
-            {allClassified && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-lg bg-green-50 border border-green-200 p-4 text-sm text-green-800"
-              >
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5" />
-                  <div>
-                    <strong>Classification Complete!</strong> {fundamentalComponents.length}{' '}
-                    fundamental components will be used for system architecture.{' '}
-                    {auxiliaryComponents.length} auxiliary components will be tracked separately.
-                  </div>
-                </div>
-              </motion.div>
-            )}
           </>
         )}
       </div>
