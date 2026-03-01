@@ -239,7 +239,7 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
                             </span>
                             <span>Version {session.version}</span>
                             <span>•</span>
-                            <span>{new Date(session.updatedAt).toLocaleDateString()}</span>
+                            <span>{new Date(session.updatedAt).toLocaleString()}</span>
                           </div>
                         </div>
                         
