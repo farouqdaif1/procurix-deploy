@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Subsystem, Component, Requirement } from '@/app/types';
+import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement } from '@/app/services/api';
 import { 
   Grid3x3, 
   ChevronRight, 
@@ -37,6 +38,7 @@ interface SubsystemsViewProps {
   requirements: Requirement[];
   onComplete: () => void;
   onAddRequirements: (newRequirements: Requirement[]) => void;
+  sessionId: string;
 }
 
 type SubsystemRequirementPriority = 'critical' | 'high' | 'mandatory' | 'medium' | 'low';
@@ -50,9 +52,13 @@ interface SubsystemRequirement {
   category: string;
 }
 
-export function SubsystemsView({ subsystems, components, requirements, onComplete, onAddRequirements }: SubsystemsViewProps) {
+export function SubsystemsView({ subsystems, components, requirements, onComplete, onAddRequirements, sessionId }: SubsystemsViewProps) {
   const [selectedSubsystem, setSelectedSubsystem] = useState<Subsystem | null>(null);
+  const [subsystemDetails, setSubsystemDetails] = useState<any>(null);
   const [subsystemRequirements, setSubsystemRequirements] = useState<Record<string, SubsystemRequirement[]>>({});
+  const [subsystemComponents, setSubsystemComponents] = useState<Record<string, Component[]>>({});
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [requirementsNotFound, setRequirementsNotFound] = useState<Record<string, boolean>>({});
   const [isAddingRequirement, setIsAddingRequirement] = useState(false);
   const [viewMode, setViewMode] = useState<'structured' | 'grid' | 'classification'>('structured');
   const [newRequirement, setNewRequirement] = useState({
@@ -80,8 +86,117 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
   });
   const [isEditingSpecs, setIsEditingSpecs] = useState(false);
   const [editedSpecs, setEditedSpecs] = useState<Record<string, any>>({});
+  const [isGeneratingRequirements, setIsGeneratingRequirements] = useState(false);
+  const [showCreateRequirementModal, setShowCreateRequirementModal] = useState(false);
+  const [isCreatingRequirement, setIsCreatingRequirement] = useState(false);
+  const [createRequirementForm, setCreateRequirementForm] = useState({
+    description: '',
+    criteria: '',
+    priority: 'medium',
+    mapped_components: [] as string[],
+  });
+
+  // Fetch subsystem details and requirements when a subsystem is selected
+  useEffect(() => {
+    const fetchSubsystemData = async () => {
+      if (!selectedSubsystem || !sessionId) return;
+
+      setIsLoadingDetails(true);
+      setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: false }));
+
+      try {
+        // 1. Fetch subsystem details
+        const detailsResponse = await getSubsystemDetails(sessionId, selectedSubsystem.id);
+        setSubsystemDetails(detailsResponse);
+
+        // Update components list with detailed BOM data
+        const detailedComponents: Component[] = detailsResponse.actual_parts_bom.map((part: any) => {
+          // Try to find existing component, or create new one
+          const existingComponent = classifiedComponents.find(c => c.id === part.part_number || c.partNumber === part.part_number);
+          return existingComponent || {
+            id: part.part_number,
+            reference: part.part_number,
+            partNumber: part.part_number,
+            type: 'component',
+            description: `Component ${part.part_number}`,
+            specs: {},
+            isIdentified: true,
+            isGeneric: false,
+            complianceStatus: 'compliant',
+          };
+        });
+
+        setSubsystemComponents(prev => ({
+          ...prev,
+          [selectedSubsystem.id]: detailedComponents,
+        }));
+
+        // 2. Fetch subsystem requirements
+        try {
+          const requirementsResponse = await getSubsystemRequirementsBySubsystemId(sessionId, selectedSubsystem.id);
+          
+          // Check if requirements not found
+          if ('detail' in requirementsResponse && requirementsResponse.detail === 'Subsystem requirements not found') {
+            setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: true }));
+            setSubsystemRequirements(prev => ({
+              ...prev,
+              [selectedSubsystem.id]: [],
+            }));
+          } else if ('subsystem_requirements' in requirementsResponse) {
+            // Find requirements for this subsystem
+            const subsystemReqs = requirementsResponse.subsystem_requirements.find(
+              (sr: any) => sr.subsystem_id === selectedSubsystem.id
+            );
+            
+            if (subsystemReqs && subsystemReqs.requirements) {
+              // Map API requirements to SubsystemRequirement format
+              const mappedRequirements: SubsystemRequirement[] = subsystemReqs.requirements.map((req: Requirement) => ({
+                id: req.id,
+                subsystemId: selectedSubsystem.id,
+                title: req.title,
+                description: req.description,
+                priority: (req.priority || 'medium') as SubsystemRequirementPriority,
+                category: req.category || 'Functional',
+              }));
+
+              setSubsystemRequirements(prev => ({
+                ...prev,
+                [selectedSubsystem.id]: mappedRequirements,
+              }));
+            } else {
+              setSubsystemRequirements(prev => ({
+                ...prev,
+                [selectedSubsystem.id]: [],
+              }));
+            }
+          }
+        } catch (reqError: any) {
+          console.warn('Failed to fetch subsystem requirements:', reqError);
+          // Check if it's a "not found" error
+          if (reqError.message?.includes('not found') || reqError.message?.includes('404')) {
+            setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: true }));
+          }
+          setSubsystemRequirements(prev => ({
+            ...prev,
+            [selectedSubsystem.id]: [],
+          }));
+        }
+      } catch (error) {
+        console.error('Failed to fetch subsystem details:', error);
+        toast.error('Failed to load subsystem details');
+      } finally {
+        setIsLoadingDetails(false);
+      }
+    };
+
+    fetchSubsystemData();
+  }, [selectedSubsystem, sessionId, classifiedComponents]);
 
   const getSubsystemComponents = (subsystemId: string) => {
+    // Use detailed components if available, otherwise fall back to filtering
+    if (subsystemComponents[subsystemId]) {
+      return subsystemComponents[subsystemId];
+    }
     const subsystem = subsystems.find(s => s.id === subsystemId);
     if (!subsystem) return [];
     return classifiedComponents.filter(c => subsystem.componentIds.includes(c.id));
@@ -89,6 +204,70 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
 
   const getSubsystemRequirements = (subsystemId: string) => {
     return subsystemRequirements[subsystemId] || [];
+  };
+
+  const handleCreateRequirement = async () => {
+    if (!selectedSubsystem || !sessionId) return;
+    
+    if (!createRequirementForm.description.trim() || !createRequirementForm.criteria.trim()) {
+      toast.error('Please fill in description and criteria');
+      return;
+    }
+
+    setIsCreatingRequirement(true);
+    try {
+      const response = await createSubsystemRequirement(sessionId, {
+        subsystem_id: selectedSubsystem.id,
+        description: createRequirementForm.description,
+        criteria: createRequirementForm.criteria,
+        priority: createRequirementForm.priority,
+        mapped_components: createRequirementForm.mapped_components,
+      });
+
+      if (response.success && response.requirement) {
+        // Map API requirement to SubsystemRequirement format
+        const mappedRequirement: SubsystemRequirement = {
+          id: response.requirement.req_id,
+          subsystemId: response.requirement.subsystem_id,
+          title: response.requirement.description,
+          description: response.requirement.criteria,
+          priority: (response.requirement.priority || 'medium') as SubsystemRequirementPriority,
+          category: 'Functional',
+        };
+
+        // Update local subsystem requirements state
+        setSubsystemRequirements(prev => ({
+          ...prev,
+          [selectedSubsystem.id]: [
+            ...(prev[selectedSubsystem.id] || []),
+            mappedRequirement
+          ],
+        }));
+
+        // Clear form and close modal
+        setCreateRequirementForm({
+          description: '',
+          criteria: '',
+          priority: 'medium',
+          mapped_components: [],
+        });
+        setShowCreateRequirementModal(false);
+        setRequirementsNotFound(prev => ({
+          ...prev,
+          [selectedSubsystem.id]: false,
+        }));
+
+        toast.success('Requirement created successfully!');
+      } else {
+        toast.error('Failed to create requirement');
+      }
+    } catch (error) {
+      console.error('Failed to create requirement:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create requirement';
+      toast.error(errorMessage);
+    } finally {
+      setIsCreatingRequirement(false);
+    }
   };
 
   const handleAddRequirement = () => {
@@ -371,8 +550,18 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">{selectedSubsystem.name}</h1>
                 <p className="text-sm text-gray-600">{selectedSubsystem.type}</p>
+                {subsystemDetails?.description && (
+                  <p className="text-sm text-gray-500 mt-2 max-w-2xl">{subsystemDetails.description}</p>
+                )}
               </div>
             </div>
+            
+            {isLoadingDetails && (
+              <div className="flex items-center gap-2 text-sm text-gray-600 mb-4">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                <span>Loading subsystem details...</span>
+              </div>
+            )}
 
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2 text-sm">
@@ -399,148 +588,84 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
               {/* Quick Action: Generate Smart Requirements */}
               <div className="ml-auto">
                 <Button
-                  onClick={() => {
-                    // Generate comprehensive AI-powered requirements
-                    const newRequirements: Requirement[] = [];
-                    const newSubsystemRequirements: SubsystemRequirement[] = [];
-                    let reqCounter = 1;
+                  onClick={async () => {
+                    if (!selectedSubsystem || !sessionId) return;
                     
-                    // Helper function to add both requirement types simultaneously
-                    const addReq = (title: string, desc: string, validationType: string, priority: 'high' | 'medium' | 'critical' | 'mandatory' | 'low', category: string) => {
-                      const id = `req-${Date.now()}-${reqCounter++}`;
-                      const code = `REQ-${category.toUpperCase().substring(0, 3)}-${String(newRequirements.length + 1).padStart(3, '0')}`;
-                      newRequirements.push({
-                        id,
-                        code,
-                        title,
-                        description: desc,
-                        validationType: validationType as 'threshold' | 'boolean' | 'range' | 'enum',
-                        isPassed: true,
-                        priority: priority as 'critical' | 'high' | 'mandatory' | 'medium' | 'low',
-                        category,
-                        affectedComponents: subsystemComps.map(c => c.id)
-                      });
-                      newSubsystemRequirements.push({
-                        id,
-                        subsystemId: selectedSubsystem.id,
-                        title,
-                        description: desc,
-                        priority,
-                        category
-                      });
-                    };
-                    
-                    // Deep component analysis with expanded detection patterns
-                    const hasPowerComponents = subsystemComps.some(c => 
-                      c.type?.toLowerCase().includes('power') || 
-                      c.type?.toLowerCase().includes('regulator') ||
-                      c.type?.toLowerCase().includes('converter') ||
-                      c.reference?.toLowerCase().includes('power') ||
-                      c.partNumber?.toLowerCase().includes('ldo')
-                    );
-                    
-                    const hasProcessingComponents = subsystemComps.some(c => 
-                      c.type?.toLowerCase().includes('processor') || 
-                      c.type?.toLowerCase().includes('mcu') ||
-                      c.reference?.toLowerCase().includes('cpu') ||
-                      c.partNumber?.toLowerCase().includes('stm32')
-                    );
-                    
-                    const hasCommunicationComponents = subsystemComps.some(c => 
-                      c.type?.toLowerCase().includes('communication') || 
-                      c.reference?.toLowerCase().includes('uart') ||
-                      c.reference?.toLowerCase().includes('usb') ||
-                      c.reference?.toLowerCase().includes('can')
-                    );
-                    
-                    const hasSensorComponents = subsystemComps.some(c => 
-                      c.type?.toLowerCase().includes('sensor') || 
-                      c.reference?.toLowerCase().includes('sensor')
-                    );
-                    
-                    const hasMemoryComponents = subsystemComps.some(c => 
-                      c.type?.toLowerCase().includes('memory') || 
-                      c.type?.toLowerCase().includes('flash')
-                    );
-                    
-                    const hasDisplayComponents = subsystemComps.some(c => 
-                      c.type?.toLowerCase().includes('display') || 
-                      c.type?.toLowerCase().includes('lcd')
-                    );
-                    
-                    const hasConnectorComponents = subsystemComps.some(c => 
-                      c.type?.toLowerCase().includes('connector')
-                    );
-                    
-                    // Power requirements
-                    if (hasPowerComponents) {
-                      addReq('Power Supply Stability', 'Maintain voltage regulation within ±5% under all load conditions (0-100%)', 'performance', 'high', 'Power');
-                      addReq('Power Efficiency', 'Achieve minimum 85% power conversion efficiency at nominal load', 'performance', 'medium', 'Power');
-                      addReq('Ripple & Noise', 'Output ripple shall not exceed 50mV p-p under full load', 'performance', 'medium', 'Power');
+                    setIsGeneratingRequirements(true);
+                    try {
+                      // Call API to generate requirements (no subsystem_id query parameter)
+                      const response = await generateSubsystemRequirements(sessionId);
+                      
+                      // Get requirements for this subsystem from requirements_by_subsystem
+                      const subsystemReqs = response.requirements_by_subsystem[selectedSubsystem.id];
+                      
+                      if (subsystemReqs && subsystemReqs.length > 0) {
+                        // Map API requirements to SubsystemRequirement format
+                        const mappedRequirements: SubsystemRequirement[] = subsystemReqs.map((req) => ({
+                          id: req.req_id,
+                          subsystemId: req.subsystem_id,
+                          title: req.description,
+                          description: req.criteria,
+                          priority: (req.priority || 'medium') as SubsystemRequirementPriority,
+                          category: 'Functional', // Default category since not provided in API response
+                        }));
+
+                        // Update local subsystem requirements state
+                        setSubsystemRequirements(prev => ({
+                          ...prev,
+                          [selectedSubsystem.id]: mappedRequirements,
+                        }));
+
+                        // Map to Requirement format for parent state
+                        const fullRequirements: Requirement[] = subsystemReqs.map((req) => ({
+                          id: req.req_id,
+                          code: `REQ-${req.req_id.slice(0, 8).toUpperCase()}`,
+                          title: req.description,
+                          description: req.criteria,
+                          priority: (req.priority || 'medium') as 'critical' | 'high' | 'mandatory' | 'medium' | 'low',
+                          category: 'Functional',
+                          validationType: 'threshold' as const,
+                          isPassed: true,
+                          affectedComponents: req.mapped_components,
+                        }));
+
+                        // Update parent state with full requirements
+                        onAddRequirements(fullRequirements);
+
+                        // Clear requirements not found flag
+                        setRequirementsNotFound(prev => ({
+                          ...prev,
+                          [selectedSubsystem.id]: false,
+                        }));
+
+                        toast.success(`Generated ${mappedRequirements.length} smart requirements for ${selectedSubsystem.name}`, {
+                          description: `AI analyzed ${subsystemComps.length} components and created comprehensive specs`
+                        });
+                      } else {
+                        toast.warning(`No requirements were generated for ${selectedSubsystem.name}`);
+                      }
+                    } catch (error) {
+                      console.error('Failed to generate requirements:', error);
+                      const errorMessage = error instanceof Error ? error.message : 'Failed to generate requirements';
+                      toast.error(errorMessage);
+                    } finally {
+                      setIsGeneratingRequirements(false);
                     }
-                    
-                    // Processing requirements
-                    if (hasProcessingComponents) {
-                      addReq('Processing Performance', 'Complete critical tasks within 100ms response time', 'performance', 'high', 'Processing');
-                      addReq('Memory Management', 'Operate within allocated memory with no stack overflow', 'functional', 'high', 'Processing');
-                      addReq('Watchdog Protection', 'Implement watchdog to recover from hangs within 500ms', 'reliability', 'high', 'Reliability');
-                    }
-                    
-                    // Communication requirements
-                    if (hasCommunicationComponents) {
-                      addReq('Data Integrity', 'Maintain bit error rate (BER) < 1×10⁻⁶', 'reliability', 'high', 'Communication');
-                      addReq('Protocol Compliance', 'Comply with industry standard protocols (USB 2.0, CAN 2.0B)', 'functional', 'high', 'Communication');
-                      addReq('Error Recovery', 'Implement CRC validation and auto-retry for failed transmissions', 'reliability', 'medium', 'Communication');
-                    }
-                    
-                    // Sensor requirements
-                    if (hasSensorComponents) {
-                      addReq('Sensor Accuracy', 'Maintain accuracy within ±2% of full-scale range', 'performance', 'high', 'Sensor');
-                      addReq('Calibration Support', 'Support field calibration with non-volatile coefficient storage', 'functional', 'medium', 'Sensor');
-                    }
-                    
-                    // Memory requirements
-                    if (hasMemoryComponents) {
-                      addReq('Data Persistence', 'Store critical data in NVM with wear-leveling', 'reliability', 'high', 'Memory');
-                    }
-                    
-                    // Display requirements
-                    if (hasDisplayComponents) {
-                      addReq('Display Readability', 'Maintain readability under 0-100,000 lux ambient light', 'performance', 'medium', 'Display');
-                    }
-                    
-                    // Connector requirements
-                    if (hasConnectorComponents) {
-                      addReq('ESD Protection', 'Protect external pins against ±8kV contact discharge', 'safety', 'high', 'Safety');
-                    }
-                    
-                    // Universal requirements (always added)
-                    addReq('Operating Temperature', 'Operate within -40°C to +85°C ambient temperature', 'environmental', 'high', 'Environmental');
-                    addReq('Component Integration', `All ${subsystemComps.length} components interface with verified compatibility`, 'functional', 'high', 'Integration');
-                    addReq('Thermal Management', 'Junction temps shall not exceed manufacturer specs under max load', 'thermal', 'high', 'Thermal');
-                    addReq('EMC Compliance', 'Meet EMI/EMC per IEC 61000-6-3 emissions and 6-2 immunity', 'compliance', 'high', 'Compliance');
-                    addReq('Reliability MTBF', 'Achieve Mean Time Between Failures (MTBF) > 50,000 hours', 'reliability', 'medium', 'Reliability');
-                    
-                    // Update local subsystem requirements state so they show immediately
-                    setSubsystemRequirements(prev => ({
-                      ...prev,
-                      [selectedSubsystem.id]: [
-                        ...(prev[selectedSubsystem.id] || []),
-                        ...newSubsystemRequirements
-                      ]
-                    }));
-                    
-                    // Also update parent state
-                    onAddRequirements(newRequirements);
-                    
-                    toast.success(`Generated ${newRequirements.length} smart requirements for ${selectedSubsystem.name}`, {
-                      description: `AI analyzed ${subsystemComps.length} components and created comprehensive specs`
-                    });
                   }}
+                  disabled={isGeneratingRequirements}
                   className="gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
                 >
-                  <Zap className="h-4 w-4" />
-                  Generate Smart Requirements
+                  {isGeneratingRequirements ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-4 w-4" />
+                      Generate Smart Requirements
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
@@ -558,7 +683,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                   Functional Subsystem Requirements ({subsystemReqs.length})
                 </h2>
                 {!isAddingRequirement && !editingRequirementId && (
-                  <Button onClick={() => setIsAddingRequirement(true)} className="gap-2">
+                  <Button onClick={() => setShowCreateRequirementModal(true)} className="gap-2">
                     <Plus className="h-4 w-4" />
                     Add Requirement
                   </Button>
@@ -727,11 +852,20 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                   <div className="rounded-full bg-gray-100 w-16 h-16 flex items-center justify-center mx-auto mb-4">
                     <FileText className="h-8 w-8 text-gray-400" />
                   </div>
-                  <p className="text-gray-600 mb-4">No functional requirements yet</p>
-                  <Button onClick={() => setIsAddingRequirement(true)} variant="outline" className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Add First Requirement
-                  </Button>
+                  {requirementsNotFound[selectedSubsystem.id] ? (
+                    <>
+                      <p className="text-gray-600 mb-2 font-semibold">Subsystem requirements not found</p>
+                      <p className="text-sm text-gray-500 mb-4">No requirements have been associated with this subsystem yet.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-gray-600 mb-4">No functional requirements yet</p>
+                      <Button onClick={() => setIsAddingRequirement(true)} variant="outline" className="gap-2">
+                        <Plus className="h-4 w-4" />
+                        Add First Requirement
+                      </Button>
+                    </>
+                  )}
                 </div>
               ) : subsystemReqs.length > 0 && (
                 <>
@@ -1265,6 +1399,155 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
             )}
           </div>
         </div>
+
+        {/* Create Requirement Modal */}
+        {showCreateRequirementModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-8"
+            onClick={() => setShowCreateRequirementModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl border-2 border-gray-200 p-8 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <Plus className="h-6 w-6 text-purple-600" />
+                  Create Subsystem Requirement
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowCreateRequirementModal(false);
+                    setCreateRequirementForm({
+                      description: '',
+                      criteria: '',
+                      priority: 'medium',
+                      mapped_components: [],
+                    });
+                  }}
+                  className="rounded-lg p-2 hover:bg-gray-100 transition-colors"
+                >
+                  <X className="h-5 w-5 text-gray-500" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Description *
+                  </label>
+                  <Input
+                    placeholder="e.g., Input voltage range"
+                    value={createRequirementForm.description}
+                    onChange={(e) => setCreateRequirementForm(prev => ({ ...prev, description: e.target.value }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Criteria *
+                  </label>
+                  <Textarea
+                    placeholder="e.g., The power input subsystem must accept an input voltage between 4.5V and 5.5V without damage or performance degradation."
+                    value={createRequirementForm.criteria}
+                    onChange={(e) => setCreateRequirementForm(prev => ({ ...prev, criteria: e.target.value }))}
+                    rows={4}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Priority
+                  </label>
+                  <select
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                    value={createRequirementForm.priority}
+                    onChange={(e) => setCreateRequirementForm(prev => ({ ...prev, priority: e.target.value }))}
+                  >
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="mandatory">Mandatory</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Mapped Components
+                  </label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3">
+                    {getSubsystemComponents(selectedSubsystem.id).map((comp) => (
+                      <label key={comp.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                        <input
+                          type="checkbox"
+                          checked={createRequirementForm.mapped_components.includes(comp.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setCreateRequirementForm(prev => ({
+                                ...prev,
+                                mapped_components: [...prev.mapped_components, comp.id]
+                              }));
+                            } else {
+                              setCreateRequirementForm(prev => ({
+                                ...prev,
+                                mapped_components: prev.mapped_components.filter(id => id !== comp.id)
+                              }));
+                            }
+                          }}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="text-sm text-gray-700">{comp.partNumber || comp.reference}</span>
+                      </label>
+                    ))}
+                    {getSubsystemComponents(selectedSubsystem.id).length === 0 && (
+                      <p className="text-sm text-gray-500">No components available</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-4 border-t">
+                  <Button
+                    onClick={handleCreateRequirement}
+                    disabled={isCreatingRequirement}
+                    className="gap-2"
+                  >
+                    {isCreatingRequirement ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4" />
+                        Create Requirement
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowCreateRequirementModal(false);
+                      setCreateRequirementForm({
+                        description: '',
+                        criteria: '',
+                        priority: 'medium',
+                        mapped_components: [],
+                      });
+                    }}
+                    disabled={isCreatingRequirement}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </div>
     );
   }

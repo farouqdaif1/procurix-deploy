@@ -694,10 +694,21 @@ export interface Subsystem {
     complianceScore?: number;
 }
 
+// Backend API response format
+export interface BackendSubsystem {
+    subsystem_id: string;
+    original_subsystem_id: string;
+    name: string;
+    description: string;
+    associated_requirements: string[];
+    bom_reference: string[];
+}
+
 export interface SubsystemsResponse {
     success: boolean;
     session_id: string;
-    subsystems: Subsystem[];
+    subsystems_count: number;
+    subsystems: BackendSubsystem[];
 }
 
 export async function getSubsystems(sessionId: string): Promise<SubsystemsResponse> {
@@ -716,6 +727,62 @@ export async function getSubsystems(sessionId: string): Promise<SubsystemsRespon
     return response.json();
 }
 
+export async function generateSubsystems(sessionId: string): Promise<SubsystemsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to generate subsystems: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface SubsystemDetailsResponse {
+    subsystem_id: string;
+    name: string;
+    description: string;
+    component_bom: Array<{
+        component_id: string;
+        quantity: number;
+    }>;
+    actual_parts_bom: Array<{
+        part_number: string;
+        quantity: number;
+    }>;
+    requirements: Record<string, any>;
+}
+
+export async function getSubsystemDetails(sessionId: string, subsystemId: string): Promise<SubsystemDetailsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get subsystem details: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface SubsystemRequirementItem {
+    req_id: string;
+    subsystem_id: string;
+    description: string;
+    criteria: string;
+    priority: string;
+    mapped_components: string[];
+}
+
 export interface SubsystemRequirementsResponse {
     success: boolean;
     session_id: string;
@@ -723,6 +790,37 @@ export interface SubsystemRequirementsResponse {
         subsystem_id: string;
         requirements: Requirement[];
     }>;
+}
+
+export interface GenerateSubsystemRequirementsResponse {
+    success: boolean;
+    session_id: string;
+    requirements_count: number;
+    requirements_by_subsystem: Record<string, SubsystemRequirementItem[]>;
+    all_requirements: SubsystemRequirementItem[];
+}
+
+export interface SubsystemRequirementsNotFoundResponse {
+    detail: string;
+}
+
+export async function getSubsystemRequirementsBySubsystemId(
+    sessionId: string,
+    subsystemId: string
+): Promise<SubsystemRequirementsResponse | SubsystemRequirementsNotFoundResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/requirements?subsystem_id=${subsystemId}`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get subsystem requirements: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
 }
 
 export async function getSubsystemRequirements(sessionId: string): Promise<SubsystemRequirementsResponse> {
@@ -736,6 +834,58 @@ export async function getSubsystemRequirements(sessionId: string): Promise<Subsy
     if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to get subsystem requirements: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export async function generateSubsystemRequirements(
+    sessionId: string
+): Promise<GenerateSubsystemRequirementsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/requirements`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to generate subsystem requirements: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface CreateSubsystemRequirementRequest {
+    subsystem_id: string;
+    description: string;
+    criteria: string;
+    priority: string;
+    mapped_components: string[];
+}
+
+export interface CreateSubsystemRequirementResponse {
+    success: boolean;
+    message?: string;
+    requirement?: SubsystemRequirementItem;
+}
+
+export async function createSubsystemRequirement(
+    sessionId: string,
+    requirement: CreateSubsystemRequirementRequest
+): Promise<CreateSubsystemRequirementResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/requirements/create`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requirement),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to create subsystem requirement: ${response.status} ${errorText}`);
     }
 
     return response.json();
