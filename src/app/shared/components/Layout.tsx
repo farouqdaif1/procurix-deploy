@@ -19,7 +19,7 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
   const navigate = useNavigate();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const { sessionId, currentStage: maxReachedStage, setCurrentStage } = useSession();
-  const [isLoadingBOM, setIsLoadingBOM] = useState(false);
+  const [, setIsLoadingBOM] = useState(false);
 
   const getCurrentStage = (): SessionStage | null => {
     const path = location.pathname;
