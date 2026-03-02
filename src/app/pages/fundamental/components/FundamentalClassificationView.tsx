@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Component } from '@/app/types';
-import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X } from 'lucide-react';
+import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { classifyParts, getClassification, updateClassification } from '@/app/services/api';
+import { classifyParts, getClassification, bulkUpdateClassification } from '@/app/services/api';
 
 interface FundamentalClassificationViewProps {
   components: Component[];
@@ -28,7 +28,11 @@ export function FundamentalClassificationView({
     auxiliary_parts: number;
     non_auxiliary_parts: number;
   } | null>(null);
-  const [updatingComponents, setUpdatingComponents] = useState<Set<string>>(new Set());
+  const [isApplying, setIsApplying] = useState(false);
+  
+  // Track original state from GET request to detect changes
+  const originalClassificationMapRef = useRef<Record<string, 'auxiliary' | 'non-auxiliary' | null>>({});
+  const dataFromGetRef = useRef<boolean>(false);
 
   // Fetch classification data when component mounts or sessionId changes
   useEffect(() => {
@@ -50,6 +54,10 @@ export function FundamentalClassificationView({
         try {
           classificationResult = await getClassification(sessionId);
           console.log('Got classification from GET endpoint');
+          dataFromGetRef.current = true;
+          
+          // Store original classification map for change detection
+          originalClassificationMapRef.current = { ...classificationResult.classification_map };
           
           // Check if classification_map has all null values (classification not done yet)
           const classificationMap = classificationResult.classification_map || {};
@@ -59,6 +67,9 @@ export function FundamentalClassificationView({
             console.log('Classification map has all null values, triggering classification...');
             classificationResult = await classifyParts(sessionId);
             console.log('Generated classification from POST endpoint');
+            dataFromGetRef.current = false;
+            // Update original map after POST classification
+            originalClassificationMapRef.current = { ...classificationResult.classification_map };
           }
         } catch (getError: any) {
           // If 404, try POST to generate classification
@@ -66,6 +77,9 @@ export function FundamentalClassificationView({
             console.log('Classification not found, generating...');
             classificationResult = await classifyParts(sessionId);
             console.log('Generated classification from POST endpoint');
+            dataFromGetRef.current = false;
+            // Update original map after POST classification
+            originalClassificationMapRef.current = { ...classificationResult.classification_map };
           } else {
             throw getError;
           }
@@ -153,7 +167,7 @@ export function FundamentalClassificationView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  const handleClassify = async (componentId: string, isFundamental: boolean) => {
+  const handleClassify = (componentId: string, isFundamental: boolean) => {
     const component = localComponents.find((c) => c.id === componentId);
     
     // Validate component and partNumber
@@ -167,40 +181,74 @@ export function FundamentalClassificationView({
       console.error('Component missing partNumber:', component);
       return;
     }
-    
-    if (!sessionId) {
-      toast.error('Session ID is missing');
-      return;
-    }
-
-    // Check if already updating this component
-    if (updatingComponents.has(componentId)) {
-      return;
-    }
 
     // Determine new classification based on isFundamental
     // isFundamental = true means non-auxiliary, false means auxiliary
     const newClassification: 'auxiliary' | 'non-auxiliary' = isFundamental ? 'non-auxiliary' : 'auxiliary';
-    const oldClassification: 'auxiliary' | 'non-auxiliary' = component.isFundamental ? 'non-auxiliary' : 'auxiliary';
+    const oldClassification: 'auxiliary' | 'non-auxiliary' | null = component.isFundamental === true 
+      ? 'non-auxiliary' 
+      : component.isFundamental === false 
+        ? 'auxiliary' 
+        : null;
 
     // If classification hasn't changed, do nothing
     if (newClassification === oldClassification) {
       return;
     }
 
-    // Optimistically update UI
+    // Update UI locally (no API call yet)
     setLocalComponents((prev) =>
       prev.map((c) => (c.id === componentId ? { ...c, isFundamental } : c))
     );
+  };
 
-    // Mark as updating
-    setUpdatingComponents((prev) => new Set(prev).add(componentId));
+  // Calculate pending changes by comparing current state with original state
+  const getPendingChanges = () => {
+    const changes: Array<{ mpn: string; new_classification: 'auxiliary' | 'non-auxiliary' }> = [];
+    
+    localComponents.forEach((component) => {
+      if (!component.partNumber) return;
+      
+      const mpn = component.partNumber.trim();
+      const originalClassification = originalClassificationMapRef.current[mpn];
+      
+      // Determine current classification
+      const currentClassification: 'auxiliary' | 'non-auxiliary' | null = component.isFundamental === true 
+        ? 'non-auxiliary' 
+        : component.isFundamental === false 
+          ? 'auxiliary' 
+          : null;
+      
+      // Only include if it's different from original
+      if (currentClassification !== originalClassification && currentClassification !== null) {
+        changes.push({
+          mpn,
+          new_classification: currentClassification,
+        });
+      }
+    });
+    
+    return changes;
+  };
+
+  const handleApplyClassification = async () => {
+    if (!sessionId) {
+      toast.error('Session ID is missing');
+      return;
+    }
+
+    const pendingChanges = getPendingChanges();
+    
+    if (pendingChanges.length === 0) {
+      toast.info('No changes to apply');
+      return;
+    }
+
+    setIsApplying(true);
 
     try {
-      // Call API to update classification - use trimmed partNumber
-      const mpn = component.partNumber.trim();
-      console.log('Updating classification:', { mpn, newClassification, sessionId });
-      const result = await updateClassification(sessionId, mpn, newClassification);
+      console.log('Applying bulk classification updates:', { partsCount: pendingChanges.length });
+      const result = await bulkUpdateClassification(sessionId, pendingChanges);
 
       // Update stats from API response
       if (result.statistics && classificationStats) {
@@ -211,26 +259,25 @@ export function FundamentalClassificationView({
         });
       }
 
-      toast.success(result.message || `Updated ${component.partNumber} classification`);
-    } catch (error) {
-      // Revert optimistic update on error
-      setLocalComponents((prev) =>
-        prev.map((c) => (c.id === componentId ? { ...c, isFundamental: !isFundamental } : c))
-      );
+      // Update original map to reflect applied changes
+      pendingChanges.forEach((change) => {
+        originalClassificationMapRef.current[change.mpn] = change.new_classification;
+      });
 
-      const errorMessage = error instanceof Error ? error.message : 'Failed to update classification';
+      toast.success(result.message || `Successfully applied ${pendingChanges.length} classification changes`);
+      
+      // Redirect to next step after successful apply
+      onClassificationComplete(localComponents);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to apply classification';
       toast.error(errorMessage);
     } finally {
-      // Remove from updating set
-      setUpdatingComponents((prev) => {
-        const next = new Set(prev);
-        next.delete(componentId);
-        return next;
-      });
+      setIsApplying(false);
     }
   };
 
   const handleProceed = () => {
+    // Go to next stage without applying changes (when no changes exist)
     onClassificationComplete(localComponents);
   };
 
@@ -239,6 +286,9 @@ export function FundamentalClassificationView({
   const unclassifiedComponents = localComponents.filter((c) => c.isFundamental === undefined);
 
   const allClassified = unclassifiedComponents.length === 0;
+  const pendingChanges = getPendingChanges();
+  const hasPendingChanges = pendingChanges.length > 0;
+  const dataFromGet = dataFromGetRef.current;
 
   // Filter components based on search query
   const filterComponents = (components: Component[]) => {
@@ -456,7 +506,6 @@ export function FundamentalClassificationView({
                       </div>
                     ) : (
                       filteredFundamental.map((comp) => {
-                        const isUpdating = updatingComponents.has(comp.id);
                         return (
                           <motion.div
                             key={comp.id}
@@ -464,12 +513,8 @@ export function FundamentalClassificationView({
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
-                            onClick={() => !isUpdating && handleClassify(comp.id, false)}
-                            className={`bg-white border border-blue-300 rounded p-2 transition-all group ${
-                              isUpdating
-                                ? 'cursor-wait opacity-60'
-                                : 'cursor-pointer hover:border-blue-500'
-                            }`}
+                            onClick={() => handleClassify(comp.id, false)}
+                            className="bg-white border border-blue-300 rounded p-2 transition-all group cursor-pointer hover:border-blue-500"
                           >
                             <div className="flex items-center justify-between gap-2">
                               {comp.partNumber && (
@@ -477,11 +522,7 @@ export function FundamentalClassificationView({
                                   {comp.partNumber}
                                 </span>
                               )}
-                              {isUpdating ? (
-                                <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />
-                              ) : (
-                                <span className="text-xs text-gray-500 group-hover:text-blue-600">Move →</span>
-                              )}
+                              <span className="text-xs text-gray-500 group-hover:text-blue-600">Move →</span>
                             </div>
                           </motion.div>
                         );
@@ -511,7 +552,6 @@ export function FundamentalClassificationView({
                       </div>
                     ) : (
                       filteredAuxiliary.map((comp) => {
-                        const isUpdating = updatingComponents.has(comp.id);
                         return (
                           <motion.div
                             key={comp.id}
@@ -519,19 +559,11 @@ export function FundamentalClassificationView({
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
-                            onClick={() => !isUpdating && handleClassify(comp.id, true)}
-                            className={`bg-white border border-gray-300 rounded p-2 transition-all group ${
-                              isUpdating
-                                ? 'cursor-wait opacity-60'
-                                : 'cursor-pointer hover:border-gray-400'
-                            }`}
+                            onClick={() => handleClassify(comp.id, true)}
+                            className="bg-white border border-gray-300 rounded p-2 transition-all group cursor-pointer hover:border-gray-400"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              {isUpdating ? (
-                                <Loader2 className="h-3 w-3 text-gray-500 animate-spin" />
-                              ) : (
-                                <span className="text-xs text-gray-500 group-hover:text-gray-700">← Move</span>
-                              )}
+                              <span className="text-xs text-gray-500 group-hover:text-gray-700">← Move</span>
                               {comp.partNumber && (
                                 <span className="text-sm text-gray-700 font-mono bg-gray-50 border border-gray-300 px-2 py-1 rounded font-medium">
                                   {comp.partNumber}
@@ -546,24 +578,50 @@ export function FundamentalClassificationView({
                 </div>
               </div>
 
-              {/* Proceed Button - Always enabled if all classified */}
-              <button
-                onClick={handleProceed}
-                disabled={!allClassified}
-                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-white font-medium text-sm hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-              >
-                {!allClassified ? (
-                  <>
-                    <AlertCircle className="h-4 w-4" />
-                    Classify {unclassifiedComponents.length} component(s) first
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="h-4 w-4" />
-                    Apply Classification
-                  </>
-                )}
-              </button>
+              {/* Action Buttons */}
+              {!allClassified ? (
+                <button
+                  disabled
+                  className="w-full rounded-lg bg-gray-300 px-4 py-2 text-gray-600 font-medium text-sm cursor-not-allowed flex items-center justify-center gap-2 transition-all"
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  Classify {unclassifiedComponents.length} component(s) first
+                </button>
+              ) : hasPendingChanges ? (
+                <button
+                  onClick={handleApplyClassification}
+                  disabled={isApplying}
+                  className="w-full rounded-lg bg-blue-600 px-4 py-2 text-white font-medium text-sm hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
+                >
+                  {isApplying ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Applying {pendingChanges.length} change(s)...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      Apply Classification ({pendingChanges.length} change{pendingChanges.length !== 1 ? 's' : ''})
+                    </>
+                  )}
+                </button>
+              ) : dataFromGet ? (
+                <button
+                  onClick={handleProceed}
+                  className="w-full rounded-lg bg-green-600 px-4 py-2 text-white font-medium text-sm hover:bg-green-700 flex items-center justify-center gap-2 transition-all"
+                >
+                  <span>Go to Next Stage</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleProceed}
+                  className="w-full rounded-lg bg-blue-600 px-4 py-2 text-white font-medium text-sm hover:bg-blue-700 flex items-center justify-center gap-2 transition-all"
+                >
+                  <CheckCircle className="h-4 w-4" />
+                  Proceed to Next Stage
+                </button>
+              )}
             </div>
           </>
         )}

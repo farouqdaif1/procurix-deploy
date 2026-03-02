@@ -132,6 +132,69 @@ export async function updateClassification(
     return response.json();
 }
 
+export interface BulkUpdateClassificationRequest {
+    parts: Array<{
+        mpn: string;
+        new_classification: 'auxiliary' | 'non-auxiliary';
+    }>;
+}
+
+export interface BulkUpdateClassificationResponse {
+    success: boolean;
+    message: string;
+    updated_count: number;
+    statistics: {
+        total_parts: number;
+        exempt_count: number;
+        candidates_count: number;
+    };
+}
+
+export async function bulkUpdateClassification(
+    sessionId: string,
+    parts: Array<{ mpn: string; new_classification: 'auxiliary' | 'non-auxiliary' }>
+): Promise<BulkUpdateClassificationResponse> {
+    // Validate inputs
+    if (!parts || parts.length === 0) {
+        throw new Error('At least one part is required for bulk update');
+    }
+
+    // Validate each part
+    for (const part of parts) {
+        if (!part.mpn || part.mpn.trim() === '') {
+            throw new Error('MPN (Manufacturer Part Number) is required for all parts');
+        }
+        if (part.new_classification !== 'auxiliary' && part.new_classification !== 'non-auxiliary') {
+            throw new Error(`Invalid classification: ${part.new_classification}. Must be 'auxiliary' or 'non-auxiliary'`);
+        }
+    }
+
+    const requestBody: BulkUpdateClassificationRequest = {
+        parts: parts.map(part => ({
+            mpn: part.mpn.trim(),
+            new_classification: part.new_classification,
+        })),
+    };
+
+    console.log('Bulk update classification request:', { sessionId, partsCount: parts.length });
+
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/update-classification`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Bulk update classification error:', { status: response.status, errorText, requestBody });
+        throw new Error(`Failed to bulk update classification: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
 export interface SystemSuggestion {
     systemType: string;
     primaryFunction: string;
