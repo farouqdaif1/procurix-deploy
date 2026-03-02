@@ -10,7 +10,7 @@ interface AnalysisViewProps {
 }
 
 export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
-  const { sessionId } = useSession();
+  const { sessionId, setCurrentStage } = useSession();
   const [isAnalyzing, setIsAnalyzing] = useState(true);
   const [hasGenerated, setHasGenerated] = useState(false);
   const [suggestions, setSuggestions] = useState<SystemSuggestion[]>([]);
@@ -40,7 +40,7 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
           // If 404, try POST to generate analysis
           if (getError.message?.includes('404') || getError.message?.includes('Failed to get system analysis: 404')) {
             console.log('System analysis not found, generating...');
-            result = await analyzeSystem(sessionId, additionalContext || undefined);
+            result = await analyzeSystem(sessionId, additionalContext || undefined, setCurrentStage);
             console.log('Generated system analysis from POST endpoint');
           } else {
             throw getError;
@@ -76,7 +76,7 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
     setError(null);
 
     try {
-      const result = await analyzeSystem(sessionId, additionalContext || undefined);
+      const result = await analyzeSystem(sessionId, additionalContext || undefined, setCurrentStage);
       
       if (!result.success) {
         throw new Error('Analysis request was not successful');
@@ -102,7 +102,7 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
     if (selectedSuggestion !== null && sessionId) {
       try {
         // Call API to select the system type
-        await selectSystemType(sessionId, selectedSuggestion);
+        await selectSystemType(sessionId, selectedSuggestion, setCurrentStage);
         
         const selected = suggestions[selectedSuggestion];
         onSystemTypeSelected(selected.systemType);

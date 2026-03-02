@@ -5,6 +5,8 @@ import { StageIndicator } from '@/app/shared/components/StageIndicator';
 import { useState, useEffect } from 'react';
 import { CommandPalette } from '@/app/shared/components/CommandPalette';
 import type { SessionStage } from '@/app/types';
+import { useSession } from '@/app/context/SessionContext';
+import { getBOMBySessionId } from '@/app/services/api';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -16,6 +18,8 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
   const location = useLocation();
   const navigate = useNavigate();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const { sessionId, currentStage: maxReachedStage, setCurrentStage } = useSession();
+  const [isLoadingBOM, setIsLoadingBOM] = useState(false);
 
   const getCurrentStage = (): SessionStage | null => {
     const path = location.pathname;
@@ -35,6 +39,27 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
   };
 
   const currentStage = getCurrentStage();
+
+  // Fetch BOM data to get current_stage when sessionId changes
+  useEffect(() => {
+    const fetchBOMData = async () => {
+      if (sessionId && !maxReachedStage) {
+        setIsLoadingBOM(true);
+        try {
+          const bom = await getBOMBySessionId(sessionId);
+          if (bom) {
+            setCurrentStage(bom.current_stage);
+          }
+        } catch (error) {
+          console.error('Error fetching BOM data:', error);
+        } finally {
+          setIsLoadingBOM(false);
+        }
+      }
+    };
+
+    fetchBOMData();
+  }, [sessionId, maxReachedStage, setCurrentStage]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -112,6 +137,7 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
         {showStageIndicator && currentStage && (
           <StageIndicator
             currentStage={currentStage}
+            maxReachedStage={maxReachedStage}
             onStageClick={(stage) => {
               const stageRoutes: Record<string, string> = {
                 upload: '/upload',

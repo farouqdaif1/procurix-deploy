@@ -21,7 +21,7 @@ interface RequirementsViewProps {
 }
 
 export function RequirementsView({ onRequirementsComplete }: RequirementsViewProps) {
-  const { sessionId } = useSession();
+  const { sessionId, setCurrentStage } = useSession();
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [isGenerating, setIsGenerating] = useState(true);
   const [, setError] = useState<string | null>(null);
@@ -59,6 +59,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
           // Check if requirements are empty (not generated yet)
           if (result.requirements_count === 0 || (result.requirements && result.requirements.length === 0)) {
             console.log('Requirements are empty, generating...');
+            // Don't update stage when just loading/fetching - only update when user completes action
             result = await getRequirements(sessionId);
             console.log('Generated requirements from POST endpoint');
           }
@@ -66,6 +67,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
           // If 404, try POST to generate requirements
           if (getError.message?.includes('404') || getError.message?.includes('Failed to get requirements: 404')) {
             console.log('Requirements not found, generating...');
+            // Don't update stage when just loading/fetching - only update when user completes action
             result = await getRequirements(sessionId);
             console.log('Generated requirements from POST endpoint');
           } else {
@@ -128,13 +130,15 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
         ? updates.value.split(',').map(ref => ref.trim()).filter(ref => ref.length > 0)
         : requirement.source;
       
-      // Call API to update requirement
+      // Call API to update requirement (pass setCurrentStage to update context with current stage)
+      // This fetches the current stage from backend and updates context, but shouldn't advance the stage
       const result = await updateRequirement(
         sessionId,
         reqId,
         updates.description || requirement.description,
         requirement.category,
-        bomReference
+        bomReference,
+        setCurrentStage
       );
 
       // Update local state with API response

@@ -12,7 +12,7 @@ interface ValidationViewProps {
 }
 
 export function ValidationView({ components: _components, onValidationComplete }: ValidationViewProps) {
-  const { sessionId } = useSession();
+  const { sessionId, setCurrentStage } = useSession();
   const [isValidating, setIsValidating] = useState(true);
   const [validationData, setValidationData] = useState<{
     total_parts: number;
@@ -46,7 +46,7 @@ export function ValidationView({ components: _components, onValidationComplete }
           // If 404, try POST to generate validation
           if (getError.message?.includes('404') || getError.message?.includes('Failed to get validation results: 404')) {
             console.log('Validation results not found, generating...');
-            result = await validateParts(sessionId);
+            result = await validateParts(sessionId, setCurrentStage);
             console.log('Generated validation results from POST endpoint');
           } else {
             throw getError;

@@ -6,6 +6,8 @@ interface SessionContextType {
   setSessionId: (sessionId: string | null) => void;
   uploadData: UploadBOMResponse | null;
   setUploadData: (data: UploadBOMResponse | null) => void;
+  currentStage: number | null;
+  setCurrentStage: (stage: number | null) => void;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
@@ -13,9 +15,10 @@ const SessionContext = createContext<SessionContextType | undefined>(undefined);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [uploadData, setUploadData] = useState<UploadBOMResponse | null>(null);
+  const [currentStage, setCurrentStage] = useState<number | null>(null);
 
   return (
-    <SessionContext.Provider value={{ sessionId, setSessionId, uploadData, setUploadData }}>
+    <SessionContext.Provider value={{ sessionId, setSessionId, uploadData, setUploadData, currentStage, setCurrentStage }}>
       {children}
     </SessionContext.Provider>
   );

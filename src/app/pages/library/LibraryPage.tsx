@@ -23,7 +23,7 @@ const mapStageNumberToStage = (stageNumber: number): SessionStage => {
 
 export function LibraryPage() {
   const navigate = useNavigate();
-  const { setSessionId } = useSession();
+  const { setSessionId, setCurrentStage } = useSession();
   const [sessions, setSessions] = useState<BOMSession[]>([]);
   const [sessionStageMap, setSessionStageMap] = useState<Map<string, number>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
@@ -82,6 +82,9 @@ export function LibraryPage() {
     
     // Get the current stage number from the map
     const currentStage = sessionStageMap.get(session.id) || 1;
+    
+    // Set current_stage in context so StageIndicator knows the max reached stage
+    setCurrentStage(currentStage);
     
     // Get the route for this stage
     const route = getRouteForStage(currentStage);

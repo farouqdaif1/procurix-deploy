@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Component } from '@/app/types';
-import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight } from 'lucide-react';
+import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight, RotateCcw } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
@@ -15,7 +15,7 @@ export function FundamentalClassificationView({
   components: _components, // Unused - we create components from classification data
   onClassificationComplete,
 }: FundamentalClassificationViewProps) {
-  const { sessionId } = useSession();
+  const { sessionId, setCurrentStage } = useSession();
   const [isClassifying, setIsClassifying] = useState(true);
   const [classifyProgress, setClassifyProgress] = useState(0);
   const [currentClassifying, setCurrentClassifying] = useState(0);
@@ -65,7 +65,7 @@ export function FundamentalClassificationView({
           
           if (allValuesNull && Object.keys(classificationMap).length > 0) {
             console.log('Classification map has all null values, triggering classification...');
-            classificationResult = await classifyParts(sessionId);
+            classificationResult = await classifyParts(sessionId, setCurrentStage);
             console.log('Generated classification from POST endpoint');
             dataFromGetRef.current = false;
             // Update original map after POST classification
@@ -75,7 +75,7 @@ export function FundamentalClassificationView({
           // If 404, try POST to generate classification
           if (getError.message?.includes('404') || getError.message?.includes('Failed to get classification: 404')) {
             console.log('Classification not found, generating...');
-            classificationResult = await classifyParts(sessionId);
+            classificationResult = await classifyParts(sessionId, setCurrentStage);
             console.log('Generated classification from POST endpoint');
             dataFromGetRef.current = false;
             // Update original map after POST classification
@@ -231,6 +231,32 @@ export function FundamentalClassificationView({
     return changes;
   };
 
+  const handleResetChanges = () => {
+    // Restore components to their original classification state
+    setLocalComponents((prev) =>
+      prev.map((component) => {
+        if (!component.partNumber) return component;
+        
+        const mpn = component.partNumber.trim();
+        const originalClassification = originalClassificationMapRef.current[mpn];
+        
+        // Convert original classification back to isFundamental
+        const isFundamental = originalClassification === null
+          ? undefined
+          : originalClassification === 'non-auxiliary'
+            ? true
+            : false;
+        
+        return {
+          ...component,
+          isFundamental,
+        };
+      })
+    );
+    
+    toast.success('Changes reset to original classification');
+  };
+
   const handleApplyClassification = async () => {
     if (!sessionId) {
       toast.error('Session ID is missing');
@@ -248,7 +274,8 @@ export function FundamentalClassificationView({
 
     try {
       console.log('Applying bulk classification updates:', { partsCount: pendingChanges.length });
-      const result = await bulkUpdateClassification(sessionId, pendingChanges);
+      // Pass setCurrentStage to automatically update stage after PUT
+      const result = await bulkUpdateClassification(sessionId, pendingChanges, setCurrentStage);
 
       // Update stats from API response
       if (result.statistics && classificationStats) {
@@ -588,23 +615,33 @@ export function FundamentalClassificationView({
                   Classify {unclassifiedComponents.length} component(s) first
                 </button>
               ) : hasPendingChanges ? (
-                <button
-                  onClick={handleApplyClassification}
-                  disabled={isApplying}
-                  className="w-full rounded-lg bg-blue-600 px-4 py-2 text-white font-medium text-sm hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-                >
-                  {isApplying ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Applying {pendingChanges.length} change(s)...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="h-4 w-4" />
-                      Apply Classification ({pendingChanges.length} change{pendingChanges.length !== 1 ? 's' : ''})
-                    </>
-                  )}
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleResetChanges}
+                    disabled={isApplying}
+                    className="flex-1 rounded-lg bg-gray-200 px-4 py-2 text-gray-700 font-medium text-sm hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Reset Changes
+                  </button>
+                  <button
+                    onClick={handleApplyClassification}
+                    disabled={isApplying}
+                    className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-white font-medium text-sm hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
+                  >
+                    {isApplying ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Applying {pendingChanges.length} change(s)...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-4 w-4" />
+                        Apply Classification ({pendingChanges.length} change{pendingChanges.length !== 1 ? 's' : ''})
+                      </>
+                    )}
+                  </button>
+                </div>
               ) : dataFromGet ? (
                 <button
                   onClick={handleProceed}

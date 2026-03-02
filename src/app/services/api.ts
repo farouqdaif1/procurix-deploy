@@ -40,7 +40,11 @@ export interface UploadBOMResponse {
     }>;
 }
 
-export async function uploadBOM(sessionId: string, file: File): Promise<UploadBOMResponse> {
+export async function uploadBOM(
+    sessionId: string,
+    file: File,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<UploadBOMResponse> {
     const formData = new FormData();
     formData.append('file', file);
 
@@ -54,7 +58,16 @@ export async function uploadBOM(sessionId: string, file: File): Promise<UploadBO
         throw new Error(`Failed to upload BOM: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful POST
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after BOM upload:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface ClassifyPartsResponse {
@@ -65,7 +78,10 @@ export interface ClassifyPartsResponse {
     classification_map: Record<string, 'auxiliary' | 'non-auxiliary' | null>;
 }
 
-export async function classifyParts(sessionId: string): Promise<ClassifyPartsResponse> {
+export async function classifyParts(
+    sessionId: string,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<ClassifyPartsResponse> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/classify`, {
         method: 'POST',
         headers: {
@@ -78,7 +94,16 @@ export async function classifyParts(sessionId: string): Promise<ClassifyPartsRes
         throw new Error(`Failed to classify parts: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful POST
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after classification:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface UpdateClassificationResponse {
@@ -97,7 +122,8 @@ export interface UpdateClassificationResponse {
 export async function updateClassification(
     sessionId: string,
     mpn: string,
-    newClassification: 'auxiliary' | 'non-auxiliary'
+    newClassification: 'auxiliary' | 'non-auxiliary',
+    setCurrentStage?: (stage: number | null) => void
 ): Promise<UpdateClassificationResponse> {
     // Validate inputs
     if (!mpn || mpn.trim() === '') {
@@ -129,7 +155,16 @@ export async function updateClassification(
         throw new Error(`Failed to update classification: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful PUT
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after classification update:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface BulkUpdateClassificationRequest {
@@ -152,7 +187,8 @@ export interface BulkUpdateClassificationResponse {
 
 export async function bulkUpdateClassification(
     sessionId: string,
-    parts: Array<{ mpn: string; new_classification: 'auxiliary' | 'non-auxiliary' }>
+    parts: Array<{ mpn: string; new_classification: 'auxiliary' | 'non-auxiliary' }>,
+    setCurrentStage?: (stage: number | null) => void
 ): Promise<BulkUpdateClassificationResponse> {
     // Validate inputs
     if (!parts || parts.length === 0) {
@@ -192,7 +228,16 @@ export async function bulkUpdateClassification(
         throw new Error(`Failed to bulk update classification: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful PUT
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after bulk classification update:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface SystemSuggestion {
@@ -210,7 +255,11 @@ export interface AnalyzeResponse {
     suggestions: SystemSuggestion[];
 }
 
-export async function analyzeSystem(sessionId: string, additionalContext?: string): Promise<AnalyzeResponse> {
+export async function analyzeSystem(
+    sessionId: string,
+    additionalContext?: string,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<AnalyzeResponse> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/analyze`, {
         method: 'POST',
         headers: {
@@ -226,7 +275,16 @@ export async function analyzeSystem(sessionId: string, additionalContext?: strin
         throw new Error(`Failed to analyze system: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful POST
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after system analysis:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface SelectSystemTypeResponse {
@@ -235,7 +293,11 @@ export interface SelectSystemTypeResponse {
     selected_system_type: string;
 }
 
-export async function selectSystemType(sessionId: string, selectedIndex: number): Promise<SelectSystemTypeResponse> {
+export async function selectSystemType(
+    sessionId: string,
+    selectedIndex: number,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<SelectSystemTypeResponse> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/select-system-type`, {
         method: 'POST',
         headers: {
@@ -251,7 +313,16 @@ export async function selectSystemType(sessionId: string, selectedIndex: number)
         throw new Error(`Failed to select system type: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful POST
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after system type selection:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface ValidationResult {
@@ -273,7 +344,10 @@ export interface ValidateResponse {
     auxiliary_parts_skipped: number;
 }
 
-export async function validateParts(sessionId: string): Promise<ValidateResponse> {
+export async function validateParts(
+    sessionId: string,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<ValidateResponse> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/validate`, {
         method: 'POST',
         headers: {
@@ -287,7 +361,16 @@ export async function validateParts(sessionId: string): Promise<ValidateResponse
         throw new Error(`Failed to validate parts: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful POST
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after validation:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface Requirement {
@@ -305,7 +388,10 @@ export interface RequirementsResponse {
     requirements: Requirement[];
 }
 
-export async function getRequirements(sessionId: string): Promise<RequirementsResponse> {
+export async function getRequirements(
+    sessionId: string,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<RequirementsResponse> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements`, {
         method: 'POST',
         headers: {
@@ -319,7 +405,16 @@ export async function getRequirements(sessionId: string): Promise<RequirementsRe
         throw new Error(`Failed to get requirements: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful POST
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after requirements generation:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface UpdateRequirementResponse {
@@ -338,7 +433,8 @@ export async function updateRequirement(
     reqId: string,
     description: string,
     category: string,
-    bomReference: string[]
+    bomReference: string[],
+    setCurrentStage?: (stage: number | null) => void
 ): Promise<UpdateRequirementResponse> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements/${reqId}`, {
         method: 'PUT',
@@ -357,7 +453,16 @@ export async function updateRequirement(
         throw new Error(`Failed to update requirement: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful PUT
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after requirement update:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface Connection {
@@ -375,7 +480,10 @@ export interface AnalyzeConnectionsResponse {
     connections: Connection[];
 }
 
-export async function analyzeConnections(sessionId: string): Promise<AnalyzeConnectionsResponse> {
+export async function analyzeConnections(
+    sessionId: string,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<AnalyzeConnectionsResponse> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/analyze-connections`, {
         method: 'POST',
         headers: {
@@ -388,7 +496,16 @@ export async function analyzeConnections(sessionId: string): Promise<AnalyzeConn
         throw new Error(`Failed to analyze connections: ${response.status} ${errorText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+
+    // Update current stage after successful POST
+    if (setCurrentStage) {
+        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
+            console.error('Error updating stage after connection analysis:', err)
+        );
+    }
+
+    return result;
 }
 
 export interface BOMListItem {
@@ -420,6 +537,57 @@ export async function getAllBOMs(): Promise<GetAllBOMsResponse> {
     }
 
     return response.json();
+}
+
+export async function getBOMBySessionId(sessionId: string): Promise<BOMListItem | null> {
+    try {
+        const response = await getAllBOMs();
+        const bom = response.boms.find(b => b.session_id === sessionId);
+        return bom || null;
+    } catch (error) {
+        console.error('Error fetching BOM by session ID:', error);
+        return null;
+    }
+}
+
+export interface CurrentStageResponse {
+    stage: number;
+    stage_name: string;
+    can_proceed: boolean;
+    is_complete: boolean;
+}
+
+export async function getCurrentStage(sessionId: string): Promise<CurrentStageResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/current-stage`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get current stage: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+/**
+ * Helper function to update the current stage in context after a successful update
+ * Call this after any POST/PUT request that might advance the stage
+ */
+export async function updateCurrentStageInContext(
+    sessionId: string,
+    setCurrentStage: (stage: number | null) => void
+): Promise<void> {
+    try {
+        const stageData = await getCurrentStage(sessionId);
+        setCurrentStage(stageData.stage);
+    } catch (error) {
+        console.error('Error fetching current stage after update:', error);
+        // Don't throw - this is a background update that shouldn't block the flow
+    }
 }
 
 // GET endpoints for fetching existing data

@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { SystemArchitectureView } from './components/SystemArchitectureView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { analyzeConnections, getConnections, type Connection } from '@/app/services/api';
+import { analyzeConnections, getConnections, updateCurrentStageInContext, type Connection } from '@/app/services/api';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
 import type { Component } from '@/app/types';
 
 export function ArchitecturePage() {
   const navigate = useNavigate();
-  const { sessionId: contextSessionId, setSessionId } = useSession();
+  const { sessionId: contextSessionId, setSessionId, setCurrentStage } = useSession();
   const { sessionId: querySessionId, updateParams } = useQueryParams();
   const [components, setComponents] = useState<Component[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
@@ -54,6 +54,7 @@ export function ArchitecturePage() {
           // Check if connections are empty (not generated yet)
           if (!response.connections || response.connections.length === 0) {
             console.log('Connections are empty, generating...');
+            // Don't update stage when just loading/fetching - only update when user completes action
             response = await analyzeConnections(activeSessionId);
             console.log('Generated connections from POST endpoint');
             console.log('Connections from backend:', response.connections);
@@ -62,6 +63,7 @@ export function ArchitecturePage() {
           // If 404, try POST to generate connections
           if (getError.message?.includes('404') || getError.message?.includes('Failed to get connections: 404')) {
             console.log('Connections not found, generating...');
+            // Don't update stage when just loading/fetching - only update when user completes action
             response = await analyzeConnections(activeSessionId);
             console.log('Generated connections from POST endpoint');
             console.log('Connections from backend:', response.connections);
@@ -137,13 +139,24 @@ export function ArchitecturePage() {
     fetchConnections();
   }, [contextSessionId, querySessionId, updateParams]);
 
-  const handleArchitectureComplete = () => {
+  const handleArchitectureComplete = async () => {
     const activeSessionId = contextSessionId || querySessionId;
+    
+    // Update current stage when user explicitly completes architecture step
+    if (activeSessionId && setCurrentStage) {
+      try {
+        await updateCurrentStageInContext(activeSessionId, setCurrentStage);
+      } catch (error) {
+        console.error('Error updating stage after architecture completion:', error);
+        // Don't block navigation if stage update fails
+      }
+    }
+    
     toast.success('System architecture defined!');
     if (activeSessionId) {
-      navigate(`/requirements?session=${activeSessionId}`);
+      navigate(`/subsystems?session=${activeSessionId}`);
     } else {
-      navigate('/requirements');
+      navigate('/subsystems');
     }
   };
 

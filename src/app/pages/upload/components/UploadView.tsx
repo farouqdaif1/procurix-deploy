@@ -13,7 +13,7 @@ interface UploadViewProps {
 }
 
 export function UploadView({ onUploadComplete, onProceedToClassification }: UploadViewProps) {
-  const { setSessionId, setUploadData } = useSession();
+  const { setSessionId, setUploadData, setCurrentStage } = useSession();
   const { updateParams } = useQueryParams();
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -59,8 +59,8 @@ export function UploadView({ onUploadComplete, onProceedToClassification }: Uplo
       setSessionId(sessionId);
       updateParams(sessionId); // Update URL with new session ID
 
-      // 3. Upload the BOM file
-      const uploadResult = await uploadBOM(sessionId, file);
+      // 3. Upload the BOM file (pass setCurrentStage to auto-update stage after POST)
+      const uploadResult = await uploadBOM(sessionId, file, setCurrentStage);
 
       // 4. Store upload data in context and local state
       setUploadData(uploadResult);
