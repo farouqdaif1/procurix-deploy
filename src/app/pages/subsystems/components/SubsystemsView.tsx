@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Subsystem, Component, Requirement } from '@/app/types';
-import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement } from '@/app/services/api';
+import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, type SubsystemRequirementItem } from '@/app/services/api';
 import { 
   Grid3x3, 
   ChevronRight, 
@@ -142,8 +142,27 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
               ...prev,
               [selectedSubsystem.id]: [],
             }));
+          } else if ('requirements' in requirementsResponse && Array.isArray(requirementsResponse.requirements)) {
+            // New format: direct requirements array
+            const subsystemReqs = requirementsResponse.requirements;
+            
+            // Map API requirements to SubsystemRequirement format
+            const mappedRequirements: SubsystemRequirement[] = subsystemReqs.map((req: any) => ({
+              id: req.req_id,
+              subsystemId: req.subsystem_id,
+              title: req.description,
+              description: req.criteria,
+              priority: (req.priority || 'medium') as SubsystemRequirementPriority,
+              category: 'Functional',
+            }));
+
+            setSubsystemRequirements(prev => ({
+              ...prev,
+              [selectedSubsystem.id]: mappedRequirements,
+            }));
+            setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: false }));
           } else if ('subsystem_requirements' in requirementsResponse) {
-            // Find requirements for this subsystem
+            // Old format: subsystem_requirements array
             const subsystemReqs = requirementsResponse.subsystem_requirements.find(
               (sr: any) => sr.subsystem_id === selectedSubsystem.id
             );
@@ -169,6 +188,12 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 [selectedSubsystem.id]: [],
               }));
             }
+          } else {
+            // No requirements found
+            setSubsystemRequirements(prev => ({
+              ...prev,
+              [selectedSubsystem.id]: [],
+            }));
           }
         } catch (reqError: any) {
           console.warn('Failed to fetch subsystem requirements:', reqError);
@@ -557,9 +582,9 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
             </div>
             
             {isLoadingDetails && (
-              <div className="flex items-center gap-2 text-sm text-gray-600 mb-4">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                <span>Loading subsystem details...</span>
+              <div className="flex items-center gap-3 text-sm text-gray-600 mb-4 px-4 py-3 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+                <span className="font-medium">Loading subsystem details and requirements...</span>
               </div>
             )}
 
@@ -593,11 +618,24 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                     
                     setIsGeneratingRequirements(true);
                     try {
-                      // Call API to generate requirements (no subsystem_id query parameter)
-                      const response = await generateSubsystemRequirements(sessionId);
+                      // Call API to generate requirements for this specific subsystem
+                      const response = await generateSubsystemRequirements(sessionId, selectedSubsystem.id);
                       
-                      // Get requirements for this subsystem from requirements_by_subsystem
-                      const subsystemReqs = response.requirements_by_subsystem[selectedSubsystem.id];
+                      // Handle different response formats
+                      let subsystemReqs: SubsystemRequirementItem[] = [];
+                      
+                      if ('requirements' in response && Array.isArray(response.requirements)) {
+                        // New format: direct requirements array
+                        subsystemReqs = response.requirements;
+                      } else if ('requirements_by_subsystem' in response) {
+                        // Old format: requirements_by_subsystem object
+                        subsystemReqs = response.requirements_by_subsystem[selectedSubsystem.id] || [];
+                      } else if ('all_requirements' in response && Array.isArray(response.all_requirements)) {
+                        // Alternative format: all_requirements array filtered by subsystem_id
+                        subsystemReqs = response.all_requirements.filter(
+                          (req: SubsystemRequirementItem) => req.subsystem_id === selectedSubsystem.id
+                        );
+                      }
                       
                       if (subsystemReqs && subsystemReqs.length > 0) {
                         // Map API requirements to SubsystemRequirement format
@@ -634,13 +672,13 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
 
                         // Clear requirements not found flag
                         setRequirementsNotFound(prev => ({
-                          ...prev,
+                      ...prev,
                           [selectedSubsystem.id]: false,
-                        }));
-
+                    }));
+                    
                         toast.success(`Generated ${mappedRequirements.length} smart requirements for ${selectedSubsystem.name}`, {
-                          description: `AI analyzed ${subsystemComps.length} components and created comprehensive specs`
-                        });
+                      description: `AI analyzed ${subsystemComps.length} components and created comprehensive specs`
+                    });
                       } else {
                         toast.warning(`No requirements were generated for ${selectedSubsystem.name}`);
                       }
@@ -662,8 +700,8 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                     </>
                   ) : (
                     <>
-                      <Zap className="h-4 w-4" />
-                      Generate Smart Requirements
+                  <Zap className="h-4 w-4" />
+                  Generate Smart Requirements
                     </>
                   )}
                 </Button>
@@ -690,8 +728,18 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 )}
               </div>
 
+              {/* Loading Indicator */}
+              {isLoadingDetails && (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading requirements...</p>
+                  </div>
+                </div>
+              )}
+
               {/* Search Bar and Priority Filters */}
-              {subsystemReqs.length > 0 && !isAddingRequirement && !editingRequirementId && (
+              {!isLoadingDetails && subsystemReqs.length > 0 && !isAddingRequirement && !editingRequirementId && (
                 <div className="mb-6 space-y-4">
                   {/* Search Bar */}
                   <div className="relative">
@@ -847,7 +895,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
               )}
 
               {/* Requirements List */}
-              {subsystemReqs.length === 0 && !isAddingRequirement ? (
+              {!isLoadingDetails && subsystemReqs.length === 0 && !isAddingRequirement ? (
                 <div className="text-center py-12">
                   <div className="rounded-full bg-gray-100 w-16 h-16 flex items-center justify-center mx-auto mb-4">
                     <FileText className="h-8 w-8 text-gray-400" />
@@ -859,15 +907,15 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                     </>
                   ) : (
                     <>
-                      <p className="text-gray-600 mb-4">No functional requirements yet</p>
-                      <Button onClick={() => setIsAddingRequirement(true)} variant="outline" className="gap-2">
-                        <Plus className="h-4 w-4" />
-                        Add First Requirement
-                      </Button>
+                  <p className="text-gray-600 mb-4">No functional requirements yet</p>
+                  <Button onClick={() => setIsAddingRequirement(true)} variant="outline" className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add First Requirement
+                  </Button>
                     </>
                   )}
                 </div>
-              ) : subsystemReqs.length > 0 && (
+              ) : !isLoadingDetails && subsystemReqs.length > 0 && (
                 <>
                   <div className="space-y-3">
                     {(isRequirementsExpanded ? filteredSubsystemReqs : filteredSubsystemReqs.slice(0, 5)).map((req) => {
@@ -1038,31 +1086,40 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 <Package className="h-5 w-5 text-blue-600" />
                 Components ({subsystemComps.length})
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {subsystemComps.map((comp) => (
-                  <button
-                    key={comp.id}
-                    onClick={() => setSelectedComponent(comp)}
-                    className={`rounded-lg border p-3 transition-all text-left ${
-                      selectedComponent?.id === comp.id
-                        ? 'border-blue-500 bg-blue-50 shadow-md'
-                        : 'border-gray-200 bg-gray-50 hover:border-blue-300 hover:bg-blue-50'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="font-semibold text-sm text-gray-900">{comp.reference}</div>
-                      {comp.complianceStatus === 'compliant' && (
-                        <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
-                      )}
-                      {comp.complianceStatus === 'failed' && (
-                        <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-600 mb-1">{comp.partNumber || 'Generic'}</div>
-                    <div className="text-xs text-gray-500">{comp.manufacturer || 'N/A'}</div>
-                  </button>
-                ))}
-              </div>
+              {isLoadingDetails ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading components...</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {subsystemComps.map((comp) => (
+                    <button
+                      key={comp.id}
+                      onClick={() => setSelectedComponent(comp)}
+                      className={`rounded-lg border p-3 transition-all text-left ${
+                        selectedComponent?.id === comp.id
+                          ? 'border-blue-500 bg-blue-50 shadow-md'
+                          : 'border-gray-200 bg-gray-50 hover:border-blue-300 hover:bg-blue-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="font-semibold text-sm text-gray-900">{comp.reference}</div>
+                        {comp.complianceStatus === 'compliant' && (
+                          <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
+                        )}
+                        {comp.complianceStatus === 'failed' && (
+                          <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-600 mb-1">{comp.partNumber || 'Generic'}</div>
+                      <div className="text-xs text-gray-500">{comp.manufacturer || 'N/A'}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Component Specs Section */}

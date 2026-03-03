@@ -792,6 +792,13 @@ export interface SubsystemRequirementsResponse {
     }>;
 }
 
+export interface SubsystemRequirementsDirectResponse {
+    success: boolean;
+    subsystem_id: string;
+    requirements_count: number;
+    requirements: SubsystemRequirementItem[];
+}
+
 export interface GenerateSubsystemRequirementsResponse {
     success: boolean;
     session_id: string;
@@ -807,8 +814,8 @@ export interface SubsystemRequirementsNotFoundResponse {
 export async function getSubsystemRequirementsBySubsystemId(
     sessionId: string,
     subsystemId: string
-): Promise<SubsystemRequirementsResponse | SubsystemRequirementsNotFoundResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/requirements?subsystem_id=${subsystemId}`, {
+): Promise<SubsystemRequirementsResponse | SubsystemRequirementsDirectResponse | SubsystemRequirementsNotFoundResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}/requirements`, {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json',
@@ -840,9 +847,10 @@ export async function getSubsystemRequirements(sessionId: string): Promise<Subsy
 }
 
 export async function generateSubsystemRequirements(
-    sessionId: string
-): Promise<GenerateSubsystemRequirementsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/requirements`, {
+    sessionId: string,
+    subsystemId: string
+): Promise<GenerateSubsystemRequirementsResponse | SubsystemRequirementsDirectResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}/requirements`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
