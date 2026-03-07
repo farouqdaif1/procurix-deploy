@@ -100,14 +100,6 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
       color: 'cyan',
       summary: `${session.subsystems.length} subsystems identified`,
     },
-    {
-      id: 'compliance' as const,
-      icon: CheckCircle,
-      title: 'Compliance Analysis',
-      subtitle: 'Validation results',
-      color: 'red',
-      summary: `${compliantComponents.length}/${session.totalComponents} components compliant (${session.complianceScore}%)`,
-    },
   ];
 
   return (
@@ -632,97 +624,6 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
                                   </div>
                                 );
                               })}
-                            </div>
-                          </div>
-                        )}
-
-                        {section.id === 'compliance' && (
-                          <div>
-                            <h4 className="font-semibold text-gray-900 mb-4">Compliance Analysis Results</h4>
-                            <div className="grid grid-cols-3 gap-4 mb-4">
-                              <div className="rounded-lg bg-green-50 border border-green-200 p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <CheckCircle2 className="h-5 w-5 text-green-600" />
-                                  <span className="text-sm font-semibold text-gray-600">Compliant</span>
-                                </div>
-                                <div className="text-3xl font-bold text-green-600 mb-1">{compliantComponents.length}</div>
-                                <div className="text-xs text-gray-600">
-                                  {((compliantComponents.length / session.totalComponents) * 100).toFixed(1)}% of total
-                                </div>
-                              </div>
-                              <div className="rounded-lg bg-red-50 border border-red-200 p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <XCircle className="h-5 w-5 text-red-600" />
-                                  <span className="text-sm font-semibold text-gray-600">Failed</span>
-                                </div>
-                                <div className="text-3xl font-bold text-red-600 mb-1">{failedComponents.length}</div>
-                                <div className="text-xs text-gray-600">
-                                  {((failedComponents.length / session.totalComponents) * 100).toFixed(1)}% of total
-                                </div>
-                              </div>
-                              <div className="rounded-lg bg-purple-50 border border-purple-200 p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Shield className="h-5 w-5 text-purple-600" />
-                                  <span className="text-sm font-semibold text-gray-600">Overall Score</span>
-                                </div>
-                                <div className="text-3xl font-bold text-purple-600 mb-1">{session.complianceScore}%</div>
-                                <div className="text-xs text-gray-600">Compliance rating</div>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <h5 className="text-sm font-semibold text-green-700 mb-3 flex items-center gap-2">
-                                  <CheckCircle2 className="h-4 w-4" />
-                                  Compliant Components ({compliantComponents.length})
-                                </h5>
-                                <div className="space-y-2 max-h-96 overflow-auto">
-                                  {compliantComponents.map(c => (
-                                    <div key={c.id} className="rounded-lg bg-green-50 border border-green-200 p-3">
-                                      <div className="flex items-center justify-between mb-1">
-                                        <span className="text-sm font-semibold text-gray-900">{c.reference}</span>
-                                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                      </div>
-                                      <div className="text-xs text-gray-600 mb-1">{c.type}</div>
-                                      {c.partNumber && (
-                                        <div className="text-xs text-gray-500 font-mono">{c.partNumber}</div>
-                                      )}
-                                      <div className="mt-2">
-                                        <Badge className="bg-green-100 text-green-700 text-xs">
-                                          ✓ All requirements met
-                                        </Badge>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                              <div>
-                                <h5 className="text-sm font-semibold text-red-700 mb-3 flex items-center gap-2">
-                                  <XCircle className="h-4 w-4" />
-                                  Failed Components ({failedComponents.length})
-                                </h5>
-                                <div className="space-y-2 max-h-96 overflow-auto">
-                                  {failedComponents.map(c => (
-                                    <div key={c.id} className="rounded-lg bg-red-50 border border-red-200 p-3">
-                                      <div className="flex items-center justify-between mb-1">
-                                        <span className="text-sm font-semibold text-gray-900">{c.reference}</span>
-                                        <XCircle className="h-4 w-4 text-red-600" />
-                                      </div>
-                                      <div className="text-xs text-gray-600 mb-1">{c.type}</div>
-                                      {c.partNumber && (
-                                        <div className="text-xs text-gray-500 font-mono mb-2">{c.partNumber}</div>
-                                      )}
-                                      <div className="rounded bg-red-100 p-2">
-                                        <div className="text-xs font-semibold text-red-800 mb-1">Issues:</div>
-                                        <div className="text-xs text-red-700">
-                                          • Temperature range insufficient<br/>
-                                          • Operating voltage out of spec
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
                             </div>
                           </div>
                         )}
