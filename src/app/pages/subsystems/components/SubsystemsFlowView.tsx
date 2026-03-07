@@ -117,6 +117,7 @@ export function SubsystemsFlowView({ subsystems, components, requirements, onCom
       });
 
       // Create component nodes within subsystem group using React Flow's parent-child relationship
+      // Use unique IDs per subsystem-component combination so components can appear in multiple subsystems
       subsystemComponents.forEach((comp, compIndex) => {
         const compCol = compIndex % compsPerRow;
         const compRow = Math.floor(compIndex / compsPerRow);
@@ -130,8 +131,12 @@ export function SubsystemsFlowView({ subsystems, components, requirements, onCom
         const availableShapes: ('diamond' | 'circle' | 'square' | 'triangle')[] = ['diamond', 'circle', 'square', 'triangle'];
         const shape = availableShapes[compIndex % availableShapes.length];
 
+        // Create unique node ID by combining subsystem ID and component ID
+        // This allows the same component to appear in multiple subsystems
+        const uniqueNodeId = `${groupId}-${comp.id}`;
+
         componentNodes.push({
-          id: comp.id,
+          id: uniqueNodeId,
           type: 'component',
           position: { x: compX, y: compY },
           parentId: groupId, // Link to parent group - React Flow handles movement automatically
@@ -140,19 +145,24 @@ export function SubsystemsFlowView({ subsystems, components, requirements, onCom
             ...comp,
             category: subsystem.type,
             shape,
+            originalComponentId: comp.id, // Store original component ID for reference
           },
         });
       });
 
       // Create connections between components within the same subsystem
+      // Use unique node IDs for edges to match the component nodes
       subsystemComponents.forEach((comp, compIndex) => {
+        const compNodeId = `${groupId}-${comp.id}`;
+        
         // Connect each component to the next one in the subsystem (creating a chain)
         if (compIndex < subsystemComponents.length - 1) {
           const nextComp = subsystemComponents[compIndex + 1];
+          const nextCompNodeId = `${groupId}-${nextComp.id}`;
           newEdges.push({
-            id: `edge-${comp.id}-${nextComp.id}`,
-            source: comp.id,
-            target: nextComp.id,
+            id: `edge-${compNodeId}-${nextCompNodeId}`,
+            source: compNodeId,
+            target: nextCompNodeId,
             type: 'smoothstep',
             animated: true,
             style: {
@@ -172,11 +182,13 @@ export function SubsystemsFlowView({ subsystems, components, requirements, onCom
         // Connect to component on the right (if exists)
         if (compCol < compsPerRow - 1 && compIndex + 1 < subsystemComponents.length) {
           const rightComp = subsystemComponents[compIndex + 1];
-          if (!newEdges.find(e => e.id === `edge-${comp.id}-${rightComp.id}`)) {
+          const rightCompNodeId = `${groupId}-${rightComp.id}`;
+          const edgeId = `edge-${compNodeId}-${rightCompNodeId}-horizontal`;
+          if (!newEdges.find(e => e.id === edgeId)) {
             newEdges.push({
-              id: `edge-${comp.id}-${rightComp.id}-horizontal`,
-              source: comp.id,
-              target: rightComp.id,
+              id: edgeId,
+              source: compNodeId,
+              target: rightCompNodeId,
               type: 'smoothstep',
               animated: true,
               style: {
@@ -193,10 +205,11 @@ export function SubsystemsFlowView({ subsystems, components, requirements, onCom
           const belowIndex = compIndex + compsPerRow;
           if (belowIndex < subsystemComponents.length) {
             const belowComp = subsystemComponents[belowIndex];
+            const belowCompNodeId = `${groupId}-${belowComp.id}`;
             newEdges.push({
-              id: `edge-${comp.id}-${belowComp.id}-vertical`,
-              source: comp.id,
-              target: belowComp.id,
+              id: `edge-${compNodeId}-${belowCompNodeId}-vertical`,
+              source: compNodeId,
+              target: belowCompNodeId,
               type: 'smoothstep',
               animated: true,
               style: {
@@ -212,24 +225,19 @@ export function SubsystemsFlowView({ subsystems, components, requirements, onCom
 
     // Connect groups that share components or have dependencies
     subsystems.forEach((subsystem, idx) => {
-      const subsystemComps = components.filter(c => subsystem.componentIds.includes(c.id));
       const groupId = `group-${subsystem.id}`;
       
-      // Find other subsystems that might connect (simplified logic)
+      // Find other subsystems that might connect
       subsystems.slice(idx + 1).forEach((otherSubsystem) => {
-        const otherComps = components.filter(c => otherSubsystem.componentIds.includes(c.id));
         const otherGroupId = `group-${otherSubsystem.id}`;
         
-        // Check if components are connected (simplified - check if they share power/signal types)
-        const hasConnection = subsystemComps.some(sc => 
-          otherComps.some(oc => {
-            const scType = sc.type.toLowerCase();
-            const ocType = oc.type.toLowerCase();
-            return (scType.includes('power') && ocType.includes('power')) ||
-                   (scType.includes('signal') && ocType.includes('signal')) ||
-                   (scType.includes('data') && ocType.includes('data'));
-          })
+        // Check if subsystems share any components (by checking componentIds/bom_reference overlap)
+        const sharedComponents = subsystem.componentIds.filter(id => 
+          otherSubsystem.componentIds.includes(id)
         );
+        
+        // Connect if they share components
+        const hasConnection = sharedComponents.length > 0;
 
         if (hasConnection) {
           newEdges.push({
@@ -243,7 +251,9 @@ export function SubsystemsFlowView({ subsystems, components, requirements, onCom
               strokeWidth: 3,
               opacity: 0.6,
             },
-            label: 'interacts',
+            label: sharedComponents.length > 0 
+              ? `${sharedComponents.length} shared` 
+              : 'interacts',
             labelStyle: {
               fill: subsystemColors[idx % subsystemColors.length],
               fontWeight: 600,

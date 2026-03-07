@@ -4,7 +4,7 @@ import { SubsystemsView } from './components/SubsystemsView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
-import { getSubsystems, generateSubsystems, getConnections, getRequirementsGET, type Connection } from '@/app/services/api';
+import { getSubsystems, generateSubsystems, getConnections, getRequirementsGET } from '@/app/services/api';
 import type { Component, Subsystem, Requirement } from '@/app/types';
 
 export function SubsystemsPage() {
@@ -82,69 +82,72 @@ export function SubsystemsPage() {
 
         setSubsystems(mappedSubsystems);
 
-        // 2. Fetch connections to get all components
-        let connectionsResponse;
+        // 2. Create components from subsystems' bom_reference
+        // Extract all unique part numbers from all subsystems' bom_reference arrays
+        const uniqueParts = new Set<string>();
+        subsystemsResponse.subsystems.forEach((subsystem) => {
+          subsystem.bom_reference.forEach((partNumber) => {
+            if (partNumber) {
+              uniqueParts.add(partNumber);
+            }
+          });
+        });
+
+        // Create Component objects from part numbers in bom_reference
+        // These components will be rendered inside their respective subsystem groups
+        const componentsList: Component[] = Array.from(uniqueParts).map((partNumber) => ({
+          id: partNumber, // Use part number as ID to match with subsystem.componentIds (which contains bom_reference)
+          reference: partNumber,
+          partNumber: partNumber,
+          type: 'component',
+          description: partNumber, // Use part number as description
+          specs: {},
+          isIdentified: true,
+          isGeneric: false,
+          complianceStatus: 'unknown' as const,
+        }));
+
+        console.log('Created components from bom_reference:', {
+          totalComponents: componentsList.length,
+          components: componentsList.map(c => c.id),
+          subsystems: mappedSubsystems.map(s => ({
+            id: s.id,
+            name: s.name,
+            componentIds: s.componentIds,
+            componentCount: s.componentIds.length
+          }))
+        });
+
+        setComponents(componentsList);
+
+        // 3. Optionally fetch connections for additional component data
         try {
-          connectionsResponse = await getConnections(activeSessionId, activeSessionId);
+          const connectionsResponse = await getConnections(activeSessionId, activeSessionId);
+          // Connections can be used for additional component relationships if needed
+          if (connectionsResponse?.connections) {
+            console.log('Connections available:', connectionsResponse.connections.length);
+          }
         } catch (connError: any) {
-          // If connections don't exist, extract components from subsystems
-          console.log('Connections not available, extracting components from subsystems');
-          const uniqueParts = new Set<string>();
-          subsystemsResponse.subsystems.forEach((subsystem) => {
-            subsystem.bom_reference.forEach((partNumber) => {
-              uniqueParts.add(partNumber);
-            });
-          });
-
-          const componentsList: Component[] = Array.from(uniqueParts).map((partNumber) => ({
-            id: partNumber,
-            reference: partNumber,
-            partNumber: partNumber,
-            type: 'component',
-            description: `Component ${partNumber}`,
-            specs: {},
-            isIdentified: true,
-            isGeneric: false,
-            complianceStatus: 'compliant',
-          }));
-
-          setComponents(componentsList);
+          // Connections are optional, continue without them
+          console.log('Connections not available, using components from bom_reference only');
         }
 
-        // If connections exist, extract components from them
-        if (connectionsResponse?.connections) {
-          const uniqueParts = new Set<string>();
-          connectionsResponse.connections.forEach((conn: Connection) => {
-            if (conn.source_part) uniqueParts.add(conn.source_part);
-            if (conn.target_part) uniqueParts.add(conn.target_part);
-          });
-
-          // Also add components from subsystems' bom_reference
-          subsystemsResponse.subsystems.forEach((subsystem) => {
-            subsystem.bom_reference.forEach((partNumber) => {
-              uniqueParts.add(partNumber);
-            });
-          });
-
-          const componentsList: Component[] = Array.from(uniqueParts).map((partNumber) => ({
-            id: partNumber,
-            reference: partNumber,
-            partNumber: partNumber,
-            type: 'component',
-            description: `Component ${partNumber}`,
-            specs: {},
-            isIdentified: true,
-            isGeneric: false,
-            complianceStatus: 'compliant',
-          }));
-
-          setComponents(componentsList);
-        }
-
-        // 3. Fetch requirements
+        // 3. Fetch requirements and map to frontend Requirement type
         try {
           const requirementsResponse = await getRequirementsGET(activeSessionId);
-          setRequirements(requirementsResponse.requirements || []);
+          // Map API Requirement format to frontend Requirement format
+          const mappedRequirements: Requirement[] = (requirementsResponse.requirements || []).map((apiReq) => ({
+            id: apiReq.req_id,
+            code: apiReq.original_req_id || apiReq.req_id,
+            title: apiReq.description.split('.')[0] || apiReq.description, // Use first sentence as title
+            description: apiReq.description,
+            priority: 'medium' as const, // Default priority since API doesn't provide it
+            category: apiReq.category,
+            validationType: 'boolean' as const,
+            isPassed: true, // Default value
+            affectedComponents: apiReq.bom_reference || [],
+          }));
+          setRequirements(mappedRequirements);
         } catch (reqError: any) {
           console.warn('Failed to fetch requirements:', reqError);
           // Requirements are optional, continue without them
@@ -167,9 +170,9 @@ export function SubsystemsPage() {
     const activeSessionId = contextSessionId || querySessionId;
     toast.success('Subsystems identified!');
     if (activeSessionId) {
-      navigate(`/compliance?session=${activeSessionId}`);
+      navigate(`/review?session=${activeSessionId}`);
     } else {
-      navigate('/compliance');
+      navigate('/review');
     }
   };
 

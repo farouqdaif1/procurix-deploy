@@ -33,7 +33,6 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
       '/architecture': 'architecture',
       '/requirements': 'requirements',
       '/subsystems': 'subsystems',
-      '/compliance': 'compliance',
     };
     return stageMap[path] || null;
   };
@@ -43,6 +42,12 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
   // Fetch BOM data to get current_stage when sessionId changes
   useEffect(() => {
     const fetchBOMData = async () => {
+      // Clear stage if we're on upload page without a session (new upload)
+      if (location.pathname === '/upload' && !sessionId) {
+        setCurrentStage(null);
+        return;
+      }
+      
       if (sessionId && !maxReachedStage) {
         setIsLoadingBOM(true);
         try {
@@ -59,7 +64,7 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
     };
 
     fetchBOMData();
-  }, [sessionId, maxReachedStage, setCurrentStage]);
+  }, [sessionId, maxReachedStage, setCurrentStage, location.pathname]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -88,7 +93,6 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
       architecture: '/architecture',
       requirements: '/requirements',
       subsystems: '/subsystems',
-      compliance: '/compliance',
       review: '/review',
       completed: '/completed',
     };
@@ -149,7 +153,6 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
                 architecture: '/architecture',
                 requirements: '/requirements',
                 subsystems: '/subsystems',
-                compliance: '/compliance',
               };
               const route = stageRoutes[stage];
               if (route) {

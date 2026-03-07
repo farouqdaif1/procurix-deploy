@@ -23,7 +23,7 @@ const mapStageNumberToStage = (stageNumber: number): SessionStage => {
 
 export function LibraryPage() {
   const navigate = useNavigate();
-  const { setSessionId, setCurrentStage } = useSession();
+  const { setSessionId, setCurrentStage, setUploadData } = useSession();
   const [sessions, setSessions] = useState<BOMSession[]>([]);
   const [sessionStageMap, setSessionStageMap] = useState<Map<string, number>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
@@ -94,7 +94,12 @@ export function LibraryPage() {
   };
 
   const handleNewBOM = () => {
-    navigate('/upload');
+    // Clear all session context when starting a new BOM upload
+    setSessionId(null);
+    setCurrentStage(null);
+    setUploadData(null);
+    // Navigate to upload without any query parameters (explicitly clear them)
+    navigate('/upload', { replace: true, state: {} });
   };
 
   if (isLoading) {

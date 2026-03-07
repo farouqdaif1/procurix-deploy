@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { BOMSession, Subsystem } from '@/app/types';
 import { mockAlternatives } from '@/app/data/mockData';
 import { 
@@ -20,7 +21,8 @@ import {
   MoreHorizontal,
   ExternalLink,
   Zap,
-  Star
+  Star,
+  Settings
 } from 'lucide-react';
 import { Button } from '@/app/shared/components/ui/button';
 import { Badge } from '@/app/shared/components/ui/badge';
@@ -41,6 +43,7 @@ interface ChatMessage {
 }
 
 export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
+  const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState<SidebarSection>('home');
   const [selectedSubsystem, setSelectedSubsystem] = useState<Subsystem | null>(null);
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
@@ -673,6 +676,22 @@ export function CompletedBOMView({ session, onBack }: CompletedBOMViewProps) {
                             <Badge className="bg-orange-100 text-orange-700">
                               {subComps.length - fundamentalCount} auxiliary
                             </Badge>
+                            <Button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const params = new URLSearchParams();
+                                params.set('subsystem', subsystem.id);
+                                if (session.id) {
+                                  params.set('session', session.id);
+                                }
+                                navigate(`/optimization?${params.toString()}`);
+                              }}
+                              size="sm"
+                              className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white gap-2"
+                            >
+                              <Settings className="h-4 w-4" />
+                              Optimize
+                            </Button>
                             <ChevronDown className="h-5 w-5 text-cyan-600 group-hover:translate-x-1 transition-transform" />
                           </div>
                         </div>

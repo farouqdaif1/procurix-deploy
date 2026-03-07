@@ -455,14 +455,6 @@ Try asking questions like "What's my compliance score?" or "Tell me about my com
             <div className="flex flex-wrap gap-3">
               <Button
                 variant="outline"
-                onClick={() => onNavigateToStage('compliance')}
-                className="gap-2"
-              >
-                <Shield className="h-4 w-4" />
-                View Compliance Analysis
-              </Button>
-              <Button
-                variant="outline"
                 onClick={() => onNavigateToStage('requirements')}
                 className="gap-2"
               >

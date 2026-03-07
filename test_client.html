@@ -1,0 +1,2928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Design Evolution API - Test Client</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        h1 { color: #00d9ff; margin-bottom: 10px; }
+        h2 { color: #ff6b6b; margin: 15px 0 10px; font-size: 1.1em; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        h3 { color: #4ecdc4; margin: 10px 0 5px; font-size: 0.95em; }
+
+        .container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .panel {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 15px;
+            flex: 1;
+            min-width: 300px;
+        }
+        .panel-flow { flex: 2; min-width: 500px; }
+        .panel-state { flex: 1; min-width: 300px; }
+        .panel-response { flex: 2; min-width: 500px; max-height: 800px; overflow-y: auto; }
+
+        .flow-step {
+            background: #0f3460;
+            border-radius: 6px;
+            padding: 10px;
+            margin: 8px 0;
+            border-left: 4px solid #4ecdc4;
+        }
+        .flow-step.active { border-left-color: #00d9ff; background: #1a4a7a; }
+        .flow-step.completed { border-left-color: #4ecdc4; opacity: 0.7; }
+
+        button {
+            background: #4ecdc4;
+            color: #1a1a2e;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            margin: 3px;
+            transition: all 0.2s;
+        }
+        button:hover { background: #00d9ff; transform: translateY(-1px); }
+        button:disabled { background: #555; color: #888; cursor: not-allowed; transform: none; }
+        button.secondary { background: #ff6b6b; }
+        button.secondary:hover { background: #ff8585; }
+        button.small { padding: 4px 10px; font-size: 0.85em; }
+
+        input, select, textarea {
+            background: #0f3460;
+            border: 1px solid #333;
+            color: #eee;
+            padding: 8px;
+            border-radius: 4px;
+            width: 100%;
+            margin: 5px 0;
+        }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #4ecdc4; }
+
+        .inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .inline-form input, .inline-form select { width: auto; flex: 1; min-width: 150px; }
+
+        pre {
+            background: #0a0a15;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .json-key { color: #ff6b6b; }
+        .json-string { color: #4ecdc4; }
+        .json-number { color: #ffd93d; }
+        .json-boolean { color: #ff9f43; }
+        .json-null { color: #888; }
+
+        .status { padding: 5px 10px; border-radius: 4px; font-size: 0.85em; display: inline-block; margin: 5px 0; }
+        .status.success { background: #2d5a27; color: #90EE90; }
+        .status.error { background: #5a2727; color: #ff6b6b; }
+        .status.info { background: #27455a; color: #87CEEB; }
+        .status.loading { background: #5a4527; color: #ffd93d; }
+
+        .state-item {
+            background: #0f3460;
+            padding: 8px;
+            border-radius: 4px;
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+        .state-label { color: #888; font-size: 0.8em; }
+        .state-value { color: #4ecdc4; font-weight: 600; word-break: break-all; }
+        .state-value.empty { color: #666; font-style: italic; }
+
+        /* Loading overlay */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        .loading-overlay.active { display: flex; }
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid #333;
+            border-top-color: #4ecdc4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        .loading-text {
+            color: #4ecdc4;
+            margin-top: 20px;
+            font-size: 1.1em;
+        }
+        .loading-progress {
+            width: 300px;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            margin-top: 15px;
+            overflow: hidden;
+        }
+        .loading-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4ecdc4, #00d9ff);
+            width: 0%;
+            animation: progress 2s ease-in-out infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes progress {
+            0% { width: 0%; }
+            50% { width: 70%; }
+            100% { width: 100%; }
+        }
+
+        .tabs { display: flex; gap: 5px; margin-bottom: 10px; }
+        .tab { padding: 8px 16px; background: #0f3460; border-radius: 4px 4px 0 0; cursor: pointer; }
+        .tab.active { background: #4ecdc4; color: #1a1a2e; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75em;
+            background: #4ecdc4;
+            color: #1a1a2e;
+            margin-left: 5px;
+        }
+        .badge.count { background: #ff6b6b; }
+
+        .error-box {
+            background: #5a2727;
+            border: 1px solid #ff6b6b;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            color: #ff6b6b;
+        }
+        .warning-box {
+            background: #5a4527;
+            border: 1px solid #ffd93d;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            color: #ffd93d;
+        }
+
+        .rec-item, .alt-item {
+            background: #0a0a15;
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .rec-item:hover, .alt-item:hover { border-color: #4ecdc4; }
+        .rec-item.selected, .alt-item.selected { border-color: #00d9ff; background: #1a4a7a; }
+        .rec-detail {
+            background: #0f3460;
+            border-left: 3px solid #4ecdc4;
+            padding: 10px;
+            margin: 0 0 5px 0;
+            border-radius: 0 4px 4px 0;
+            font-size: 0.85em;
+        }
+        .rec-detail .alt-row {
+            background: #0a0a15;
+            padding: 6px 8px;
+            margin: 4px 0;
+            border-radius: 3px;
+        }
+        .rec-detail .alt-row strong { color: #4ecdc4; }
+        .rec-detail .pros { color: #90EE90; }
+        .rec-detail .cons { color: #ff6b6b; }
+
+        /* BOM Table */
+        .bom-table-wrap {
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #333;
+            border-radius: 6px;
+        }
+        .bom-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85em;
+            min-width: 700px;
+        }
+        .bom-table th {
+            background: #0f3460;
+            color: #4ecdc4;
+            padding: 8px 10px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            border-bottom: 2px solid #4ecdc4;
+            white-space: nowrap;
+        }
+        .bom-table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #222;
+            vertical-align: top;
+        }
+        .bom-table tr:nth-child(even) { background: #0a0a15; }
+        .bom-table tr:nth-child(odd) { background: #12122a; }
+        .bom-table tr:hover { background: #1a4a7a; }
+        .bom-table .compliant-yes { color: #90EE90; }
+        .bom-table .compliant-no { color: #ff6b6b; }
+        .bom-table .spec-key { color: #888; }
+        .bom-table .spec-val { color: #ffd93d; }
+        .bom-table a { color: #00d9ff; text-decoration: none; }
+        .bom-table a:hover { text-decoration: underline; }
+        .bom-summary {
+            padding: 8px 12px;
+            background: #0f3460;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            color: #ccc;
+        }
+        .bom-summary strong { color: #4ecdc4; }
+
+        /* Discuss Modal */
+        .discuss-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+        .discuss-overlay.active { display: flex; }
+        .discuss-modal {
+            background: #1e1e1e;
+            border: 1px solid #444;
+            border-radius: 8px;
+            width: 700px;
+            max-width: 90vw;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .discuss-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid #333;
+        }
+        .discuss-header h3 { margin: 0; color: #4ecdc4; font-size: 1em; }
+        .discuss-close {
+            background: none; border: none; color: #888; font-size: 1.4em;
+            cursor: pointer; padding: 0 4px;
+        }
+        .discuss-close:hover { color: #fff; }
+        .discuss-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+            min-height: 200px;
+            max-height: 60vh;
+        }
+        .discuss-msg {
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .discuss-msg.user {
+            background: #2a3a4a;
+            border-left: 3px solid #00d9ff;
+            color: #ddd;
+        }
+        .discuss-msg.agent {
+            background: #1a2a1a;
+            border-left: 3px solid #4ecdc4;
+            color: #ccc;
+            white-space: normal;
+        }
+        /* Markdown rendered content inside agent messages */
+        .discuss-msg.agent h1, .discuss-msg.agent h2, .discuss-msg.agent h3,
+        .discuss-msg.agent h4, .discuss-msg.agent h5 {
+            color: #4ecdc4;
+            margin: 12px 0 6px;
+            font-size: 1em;
+        }
+        .discuss-msg.agent h1 { font-size: 1.3em; }
+        .discuss-msg.agent h2 { font-size: 1.15em; border-bottom: 1px solid #333; padding-bottom: 4px; }
+        .discuss-msg.agent h3 { font-size: 1.05em; }
+        .discuss-msg.agent p { margin: 6px 0; }
+        .discuss-msg.agent ul, .discuss-msg.agent ol {
+            margin: 6px 0 6px 20px;
+            padding: 0;
+        }
+        .discuss-msg.agent li { margin: 3px 0; }
+        .discuss-msg.agent strong { color: #fff; }
+        .discuss-msg.agent em { color: #aadde6; }
+        .discuss-msg.agent code {
+            background: #0d1a0d;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            color: #ffd93d;
+        }
+        .discuss-msg.agent pre {
+            background: #0d1a0d;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+        .discuss-msg.agent pre code {
+            background: none;
+            padding: 0;
+        }
+        .discuss-msg.agent table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 8px 0;
+            font-size: 0.85em;
+        }
+        .discuss-msg.agent th, .discuss-msg.agent td {
+            border: 1px solid #444;
+            padding: 5px 8px;
+            text-align: left;
+        }
+        .discuss-msg.agent th {
+            background: #1a3a2a;
+            color: #4ecdc4;
+        }
+        .discuss-msg.agent hr {
+            border: none;
+            border-top: 1px solid #444;
+            margin: 12px 0;
+        }
+        .discuss-msg.agent blockquote {
+            border-left: 3px solid #ffd93d;
+            margin: 8px 0;
+            padding: 4px 12px;
+            color: #aaa;
+            background: #1a1a1a;
+        }
+        .discuss-msg.agent a {
+            color: #00d9ff;
+            text-decoration: underline;
+        }
+        /* Markdown rendered in response panel */
+        .md-response {
+            font-size: 0.9em;
+            line-height: 1.6;
+            color: #ccc;
+        }
+        .md-response h1, .md-response h2, .md-response h3, .md-response h4 {
+            color: #4ecdc4;
+            margin: 14px 0 6px;
+        }
+        .md-response h1 { font-size: 1.3em; }
+        .md-response h2 { font-size: 1.15em; border-bottom: 1px solid #333; padding-bottom: 4px; }
+        .md-response h3 { font-size: 1.05em; }
+        .md-response p { margin: 6px 0; }
+        .md-response ul, .md-response ol { margin: 6px 0 6px 20px; }
+        .md-response li { margin: 3px 0; }
+        .md-response strong { color: #fff; }
+        .md-response em { color: #aadde6; }
+        .md-response code {
+            background: #0d1a0d;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            color: #ffd93d;
+        }
+        .md-response pre {
+            background: #0d1a0d;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+        .md-response pre code { background: none; padding: 0; }
+        .md-response table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 8px 0;
+            font-size: 0.85em;
+        }
+        .md-response th, .md-response td {
+            border: 1px solid #444;
+            padding: 5px 8px;
+            text-align: left;
+        }
+        .md-response th { background: #1a3a2a; color: #4ecdc4; }
+        .md-response hr { border: none; border-top: 1px solid #444; margin: 12px 0; }
+        .md-response blockquote {
+            border-left: 3px solid #ffd93d;
+            margin: 8px 0;
+            padding: 4px 12px;
+            color: #aaa;
+            background: #1a1a1a;
+        }
+        .md-response a { color: #00d9ff; text-decoration: underline; }
+        .discuss-msg.loading {
+            background: #2a2a1a;
+            border-left: 3px solid #ffd93d;
+            color: #aaa;
+            font-style: italic;
+        }
+        .discuss-input-row {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            border-top: 1px solid #333;
+        }
+        .discuss-input-row input {
+            flex: 1;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: #eee;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .discuss-input-row button {
+            white-space: nowrap;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loading-text">Processing...</div>
+        <div class="loading-progress">
+            <div class="loading-progress-bar"></div>
+        </div>
+    </div>
+
+    <h1>Design Evolution API - Test Client</h1>
+    <p style="color: #888; margin-bottom: 20px;">Deterministic Flow Testing <span style="color:#ff6b6b;">[v2 - BOM Table]</span></p>
+
+    <div class="container">
+        <!-- Left Panel: Flow Controls -->
+        <div class="panel panel-flow">
+            <h2>1. Session Setup</h2>
+            <div class="flow-step" id="step-session">
+                <div class="inline-form">
+                    <input type="text" id="api-base" value="http://localhost:8000" placeholder="API Base URL" style="flex: 2;">
+                    <button onclick="checkHealth()">Check Health</button>
+                </div>
+                <div class="inline-form" style="margin-top: 10px;">
+                    <input type="text" id="session-id" placeholder="Session ID (auto-generated)" style="flex: 2;">
+                    <button onclick="createSession()">Create Session</button>
+                </div>
+                <div class="inline-form" style="margin-top: 10px;">
+                    <input type="file" id="bom-file" accept=".json">
+                    <button onclick="loadBOM()">Load BOM</button>
+                </div>
+            </div>
+
+            <h2>2. Deterministic Flow</h2>
+
+            <div class="flow-step" id="step-recommend">
+                <h3>Step A: Recommend (optional)</h3>
+                <p style="color: #888; font-size: 0.85em; margin-bottom: 8px;">Get prioritized list of components to improve</p>
+                <div class="inline-form">
+                    <input type="text" id="recommend-msg" placeholder="Optional: focus area (e.g., cost, efficiency)">
+                    <button onclick="callRecommend()">Recommend</button>
+                    <button onclick="openRecommendChat()" class="small secondary">Chat Mode</button>
+                </div>
+                <div id="recommendations-list" style="margin-top: 10px;"></div>
+            </div>
+
+            <div class="flow-step" id="step-focus">
+                <h3>Step B: Set Focus</h3>
+                <p style="color: #888; font-size: 0.85em; margin-bottom: 8px;">Select which component to work on</p>
+                <div class="inline-form">
+                    <select id="focus-mode" onchange="toggleFocusMode()">
+                        <option value="index">From Recommendations</option>
+                        <option value="direct">Direct Component ID</option>
+                    </select>
+                </div>
+                <div class="inline-form" style="margin-top: 8px;">
+                    <select id="focus-dropdown" style="flex: 2;" onchange="populateTopologySelect()">
+                        <option value="" disabled selected>Run Recommend first...</option>
+                    </select>
+                    <select id="focus-component" style="display: none; flex: 2;">
+                        <option value="" disabled selected>Load BOM first...</option>
+                    </select>
+                    <button onclick="setFocus()">Set Focus</button>
+                </div>
+                <div id="topology-selection" style="margin-top: 10px; display: none;">
+                    <label style="color: #888; font-size: 0.85em;">Topologies to explore:</label>
+                    <div class="inline-form" style="margin-top: 4px;">
+                        <select id="topology-select" multiple style="flex: 2; min-height: 80px;"></select>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <button onclick="selectAllTopologies()" class="small">All</button>
+                            <button onclick="clearTopologySelection()" class="small secondary">Clear</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flow-step" id="step-target-specs">
+                <h3>Step B2: Target Specs</h3>
+                <p style="color: #888; font-size: 0.85em; margin-bottom: 8px;">Set ideal specs the Part Explorer should aim for</p>
+                <!-- Mode toggle -->
+                <div class="inline-form" style="margin-bottom: 8px;">
+                    <label style="color:#ffd93d;font-size:0.85em;margin-right:8px;">Mode:</label>
+                    <select id="spec-mode" onchange="onSpecModeChange()" style="flex:0 0 auto;width:auto;min-width:250px;">
+                        <option value="topology">Topology (aspirational specs)</option>
+                        <option value="fff">FFF Drop-in (exact replacement)</option>
+                    </select>
+                </div>
+                <p id="spec-mode-desc" style="color: #888; font-size: 0.8em; margin-bottom: 8px;">Aspirational guidance with tolerances — target specs the Part Explorer should aim for</p>
+                <!-- Topology mode input -->
+                <div id="topology-mode-input" class="inline-form">
+                    <input type="text" id="target-topology" placeholder="Topology (e.g., synchronous_buck)" style="flex:2;">
+                    <button onclick="suggestTargetSpecs()">Suggest Target Specs</button>
+                    <button onclick="openTargetSpecsChat()" class="small secondary">Chat Mode</button>
+                </div>
+                <!-- FFF mode input (hidden by default) -->
+                <div id="fff-mode-input" style="display:none;">
+                    <div class="inline-form">
+                        <select id="fff-component-id" style="flex:2;">
+                            <option value="" disabled selected>Load BOM first...</option>
+                        </select>
+                        <button onclick="suggestFFFSpecs()">Analyze FFF Specs</button>
+                        <button onclick="openFFFSpecsChat()" class="small secondary">Chat Mode</button>
+                    </div>
+                    <div style="margin-top:6px;font-size:0.75em;color:#888;padding:4px 8px;background:#0a0a15;border-radius:3px;">
+                        <span style="color:#ff6b6b;">FORM</span> = Physical (exact match) |
+                        <span style="color:#ffd93d;">FIT</span> = Interface (tight bounds) |
+                        <span style="color:#4ecdc4;">FUNCTION</span> = Performance (context-dependent) |
+                        <span style="color:#ff9800;">⚠</span> = "Better" can break circuit
+                    </div>
+                </div>
+                <div class="inline-form" style="margin-top: 8px;">
+                    <button onclick="viewTargetSpecs()" class="small">View All Targets</button>
+                    <button onclick="clearTargetSpecs()" class="small secondary">Clear Topology</button>
+                </div>
+                <!-- Review panel (shared between modes) -->
+                <div id="target-specs-review" style="margin-top: 10px; display:none;">
+                    <div style="color:#ffd93d;font-size:0.85em;margin-bottom:6px;" id="review-label">Review suggested target specs below, then accept or modify:</div>
+                    <!-- Ambiguous specs alert (FFF only) -->
+                    <div id="fff-ambiguous" style="display:none;background:#3d2000;border:1px solid #ff9800;border-radius:4px;padding:8px;margin-bottom:6px;font-size:0.8em;">
+                        <strong style="color:#ff9800;">Clarification Needed:</strong>
+                        <div id="fff-ambiguous-list"></div>
+                    </div>
+                    <pre id="target-specs-preview" style="max-height:250px;overflow-y:auto;font-size:0.8em;"></pre>
+                    <div class="inline-form" style="margin-top:6px;">
+                        <button onclick="acceptTargetSpecs()" style="background:#2d5a27;">Accept Target Specs</button>
+                        <button onclick="editTargetSpecs()" class="small secondary">Edit & Accept</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flow-step" id="step-explore">
+                <h3>Step C: Part Explorer</h3>
+                <p style="color: #888; font-size: 0.85em; margin-bottom: 8px;">Find real parts for selected topologies (uses target specs as search guidance)</p>
+                <div class="inline-form">
+                    <input type="text" id="explore-msg" placeholder="Optional: criteria (e.g., automotive-grade)">
+                    <button onclick="callExplore()">Part Explorer (auto)</button>
+                    <button onclick="callExploreDirect()" class="secondary small">Part Explorer by ID</button>
+                    <button onclick="openExploreChat()" class="small secondary">Chat Mode</button>
+                </div>
+                <div id="alternatives-list" style="margin-top: 10px;"></div>
+            </div>
+
+            <div class="flow-step" id="step-select-alt">
+                <h3>Step D: Select Alternative</h3>
+                <p style="color: #888; font-size: 0.85em; margin-bottom: 8px;">Pick one alternative to apply</p>
+                <div class="inline-form">
+                    <select id="alt-dropdown" style="flex: 2;">
+                        <option value="" disabled selected>Run Explore first...</option>
+                    </select>
+                    <button onclick="selectAlternative()">Select Alternative</button>
+                </div>
+            </div>
+
+            <div class="flow-step" id="step-specs">
+                <h3>Step E: Suggest Specs (optional)</h3>
+                <p style="color: #888; font-size: 0.85em; margin-bottom: 8px;">Get detailed specs before applying</p>
+                <div class="inline-form">
+                    <input type="text" id="specs-topology" placeholder="Topology (optional, for topology-based mode)">
+                    <button onclick="suggestSpecs()">Suggest Specs</button>
+                    <button onclick="openSpecsChat()" class="small secondary">Chat Mode</button>
+                </div>
+            </div>
+
+            <div class="flow-step" id="step-apply">
+                <h3>Step F: Apply Replacement</h3>
+                <p style="color: #888; font-size: 0.85em; margin-bottom: 8px;">Execute replacement, create new BOM version</p>
+                <div class="inline-form">
+                    <button onclick="applyReplacement()" class="secondary">Apply Replacement</button>
+                    <button onclick="openApplyChat()" class="small secondary">Chat Mode</button>
+                </div>
+            </div>
+
+            <h2>3. Always Available</h2>
+            <div class="flow-step">
+                <p style="color: #888; font-size: 0.8em; margin-bottom: 6px;">Chat mode (modal with follow-ups):</p>
+                <div class="inline-form">
+                    <button onclick="openConsultChat()" class="small" style="background:#2a4a2a;border-color:#4ecdc4;">Consult Chat</button>
+                    <button onclick="openComplianceChat()" class="small" style="background:#4a2a2a;border-color:#ff6b6b;">Compliance Chat</button>
+                    <button onclick="openSearchChat()" class="small">Search Chat</button>
+                    <button onclick="openVersionsChat('history')" class="small">Versions Chat</button>
+                </div>
+                <p style="color: #888; font-size: 0.8em; margin-bottom: 6px; margin-top: 8px;">Structured mode (response panel):</p>
+                <div class="inline-form">
+                    <button onclick="callConsult()" class="small">Consult</button>
+                    <button onclick="callCompliance()" class="small">Compliance</button>
+                    <button onclick="callVersions('history')" class="small">Versions</button>
+                    <button onclick="callVersions('rollback')" class="small secondary">Rollback</button>
+                </div>
+                <div class="inline-form" style="margin-top: 8px;">
+                    <button onclick="getWorkflow()" class="small">Refresh State</button>
+                    <button onclick="clearWorkflow()" class="small secondary">Clear Workflow</button>
+                    <button onclick="getBOM()" class="small">Get BOM</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Middle Panel: Current State -->
+        <div class="panel panel-state">
+            <h2>Workflow State</h2>
+            <div id="workflow-state">
+                <div class="state-item">
+                    <div class="state-label">Session ID</div>
+                    <div class="state-value empty" id="state-session">Not set</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">BOM Status</div>
+                    <div class="state-value empty" id="state-bom">Not loaded</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">BOM Version</div>
+                    <div class="state-value empty" id="state-bom-version">-</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">Recommendations</div>
+                    <div class="state-value empty" id="state-recommendations">None</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">Selected Component (Focus)</div>
+                    <div class="state-value empty" id="state-component">None</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">Selected Topologies</div>
+                    <div class="state-value empty" id="state-topologies">None</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">Explored Alternatives</div>
+                    <div class="state-value empty" id="state-alternatives">None</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">Selected Alternative</div>
+                    <div class="state-value empty" id="state-selected-alt">None</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">Suggested Specs</div>
+                    <div class="state-value empty" id="state-specs">None</div>
+                </div>
+                <div class="state-item">
+                    <div class="state-label">Target Specs</div>
+                    <div class="state-value empty" id="state-target-specs">None</div>
+                    <div id="target-specs-detail" style="display:none;margin-top:6px;"></div>
+                </div>
+            </div>
+
+            <h2 style="margin-top: 20px;">Quick Actions</h2>
+            <div id="quick-actions">
+                <p style="color: #666; font-size: 0.85em;">Actions will appear based on workflow state</p>
+            </div>
+
+            <h2 style="margin-top: 20px;">Debug Info</h2>
+            <div id="debug-info" style="font-size: 0.8em; color: #888;">
+                <div>Last API call: <span id="debug-last-call">-</span></div>
+                <div>Response time: <span id="debug-time">-</span></div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Response -->
+        <div class="panel panel-response">
+            <h2>API Response <span id="response-status"></span></h2>
+            <div class="tabs">
+                <div class="tab active" onclick="showTab('formatted')">Formatted</div>
+                <div class="tab" onclick="showTab('raw')">Raw JSON</div>
+                <div class="tab" onclick="showTab('data')">Data Only</div>
+            </div>
+            <div id="tab-formatted" class="tab-content active">
+                <div id="response-formatted"><pre>No response yet</pre></div>
+            </div>
+            <div id="tab-raw" class="tab-content">
+                <pre id="response-raw">No response yet</pre>
+            </div>
+            <div id="tab-data" class="tab-content">
+                <pre id="response-data">No response yet</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let sessionId = '';
+        let bomLoaded = false;
+        let workflowSelections = {};
+        let lastResponse = null;
+        let bomComponents = [];  // Cached BOM components for FFF dropdown
+        let mockMode = false;  // Enable mock API responses
+
+        // Helpers
+        function getBaseUrl() {
+            return document.getElementById('api-base').value.replace(/\/$/, '');
+        }
+
+        function showLoading(text = 'Processing...') {
+            document.getElementById('loading-text').textContent = text;
+            document.getElementById('loading-overlay').classList.add('active');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').classList.remove('active');
+        }
+
+        function showResponse(data, status = 'success', elapsed = 0) {
+            lastResponse = data;
+            const statusEl = document.getElementById('response-status');
+            statusEl.className = `status ${status}`;
+            if (status === 'info') {
+                statusEl.textContent = 'Demo Mode';
+            } else {
+                statusEl.textContent = status === 'success' ? '200 OK' : 'Error';
+            }
+
+            document.getElementById('response-raw').textContent = JSON.stringify(data, null, 2);
+
+            // Check if this is info/demo mode
+            if (data.mode === 'info' || status === 'info') {
+                let html = '<div style="padding:15px;background:#2a4a2a;border:2px solid #4ecdc4;border-radius:6px;">';
+                html += '<h3 style="color:#4ecdc4;margin-bottom:10px;">' + (data.message || 'Mock Data Loaded') + '</h3>';
+                if (data.data) {
+                    html += '<pre style="background:#0a0a15;padding:10px;border-radius:4px;margin-top:10px;">' + formatJson(data.data) + '</pre>';
+                }
+                html += '</div>';
+                document.getElementById('response-formatted').innerHTML = html;
+            }
+            // Check if this is a chat-mode response with markdown
+            else if (data.mode === 'chat' && data.response && typeof marked !== 'undefined') {
+                document.getElementById('response-formatted').innerHTML =
+                    '<div class="md-response">' + marked.parse(normalizeMarkdown(data.response)) + '</div>';
+            }
+            // Check if this is compliance data
+            else if (extractComplianceData(data)) {
+                const compData = extractComplianceData(data);
+                document.getElementById('response-formatted').innerHTML = renderComplianceTable(compData);
+            }
+            // Check if this is BOM data with components array
+            else {
+                const bomComponents = extractBomComponents(data);
+                console.log('BOM detection:', bomComponents ? bomComponents.length + ' components' : 'not BOM data');
+                if (bomComponents && bomComponents.length > 0) {
+                    const tableHtml = renderBomTable(data, bomComponents);
+                    console.log('Rendering BOM table, HTML length:', tableHtml.length);
+                    document.getElementById('response-formatted').innerHTML = tableHtml;
+                } else {
+                    document.getElementById('response-formatted').innerHTML = `<pre>${formatJson(data)}</pre>`;
+                }
+            }
+
+            // Data-only view (just the data field if it exists)
+            const dataOnly = data.data || data;
+            document.getElementById('response-data').innerHTML = formatJson(dataOnly);
+
+            document.getElementById('debug-time').textContent = `${elapsed}ms`;
+
+            // Check for errors in response
+            if (data.error || data.parse_error || (data.data && data.data.error)) {
+                const errorMsg = data.error || data.parse_error || data.data?.error;
+                console.error('API Error:', errorMsg);
+            }
+        }
+
+        function extractBomComponents(data) {
+            // Find components array in various response shapes
+            if (data.components && Array.isArray(data.components)) return data.components;
+            if (data.data && data.data.components && Array.isArray(data.data.components)) return data.data.components;
+            if (data.bom && data.bom.components && Array.isArray(data.bom.components)) return data.bom.components;
+            return null;
+        }
+
+        function renderBomTable(fullData, components) {
+            // Summary line
+            const version = fullData.version || fullData.data?.version || null;
+            const subsystem = fullData.subsystem_name || fullData.data?.subsystem_name || '';
+            let summary = `<div class="bom-summary">`;
+            summary += `<strong>${components.length}</strong> components`;
+            if (subsystem) summary += ` | Subsystem: <strong>${escapeHtml(subsystem)}</strong>`;
+            if (version) summary += ` | Version: <strong>v${version}</strong>`;
+            summary += `</div>`;
+
+            // Collect all spec keys across components for dynamic columns
+            const specKeys = new Set();
+            components.forEach(c => {
+                const specs = c.specs || c.properties || {};
+                Object.keys(specs).forEach(k => specKeys.add(k));
+            });
+            // Pick the most common spec keys (up to 5) to show as columns
+            const specKeyCounts = {};
+            components.forEach(c => {
+                const specs = c.specs || c.properties || {};
+                Object.keys(specs).forEach(k => { specKeyCounts[k] = (specKeyCounts[k] || 0) + 1; });
+            });
+            const topSpecKeys = [...specKeys]
+                .sort((a, b) => (specKeyCounts[b] || 0) - (specKeyCounts[a] || 0))
+                .slice(0, 5);
+
+            // Build table
+            let html = summary;
+            html += `<div class="bom-table-wrap"><table class="bom-table">`;
+            html += `<thead><tr>`;
+            html += `<th>#</th>`;
+            html += `<th>Component ID</th>`;
+            html += `<th>Category</th>`;
+            html += `<th>Manufacturer</th>`;
+            html += `<th>Part Number</th>`;
+            topSpecKeys.forEach(k => {
+                html += `<th>${escapeHtml(formatSpecKey(k))}</th>`;
+            });
+            html += `<th>Compliant</th>`;
+            html += `<th>Datasheet</th>`;
+            html += `</tr></thead>`;
+            html += `<tbody>`;
+
+            components.forEach((c, i) => {
+                const specs = c.specs || c.properties || {};
+                const compId = c.component_id || c.name || '-';
+                const category = c.category || '-';
+                const manufacturer = c.manufacturer || '-';
+                const partNumber = c.part_number || '-';
+                const compliant = c.compliant;
+                const failedReqs = c.failed_requirements || [];
+                const datasheet = c.datasheet_url || '';
+
+                html += `<tr>`;
+                html += `<td style="color:#666;">${i + 1}</td>`;
+                html += `<td><strong style="color:#4ecdc4;">${escapeHtml(compId)}</strong></td>`;
+                html += `<td>${escapeHtml(category)}</td>`;
+                html += `<td>${escapeHtml(manufacturer)}</td>`;
+                html += `<td style="color:#ffd93d;">${escapeHtml(partNumber)}</td>`;
+
+                topSpecKeys.forEach(k => {
+                    const val = specs[k];
+                    html += `<td>`;
+                    if (val !== undefined && val !== null) {
+                        html += `<span class="spec-val">${escapeHtml(formatSpecValue(val))}</span>`;
+                    } else {
+                        html += `<span style="color:#444;">-</span>`;
+                    }
+                    html += `</td>`;
+                });
+
+                // Compliant column
+                html += `<td>`;
+                if (compliant === true) {
+                    html += `<span class="compliant-yes">PASS</span>`;
+                } else if (compliant === false) {
+                    const tipText = failedReqs.length ? failedReqs.join(', ') : 'Non-compliant';
+                    html += `<span class="compliant-no" title="${escapeHtml(tipText)}">FAIL (${failedReqs.length})</span>`;
+                } else {
+                    html += `<span style="color:#888;">-</span>`;
+                }
+                html += `</td>`;
+
+                // Datasheet
+                html += `<td>`;
+                if (datasheet) {
+                    html += `<a href="${escapeHtml(datasheet)}" target="_blank" rel="noopener">Link</a>`;
+                } else {
+                    html += `<span style="color:#444;">-</span>`;
+                }
+                html += `</td>`;
+
+                html += `</tr>`;
+            });
+
+            html += `</tbody></table></div>`;
+
+            // Extra specs detail (collapsed)
+            const remainingKeys = [...specKeys].filter(k => !topSpecKeys.includes(k));
+            if (remainingKeys.length > 0) {
+                html += `<details style="margin-top:10px;"><summary style="color:#888;cursor:pointer;">+ ${remainingKeys.length} more spec fields</summary>`;
+                html += `<div style="margin-top:6px;font-size:0.8em;color:#888;">${remainingKeys.map(k => escapeHtml(formatSpecKey(k))).join(', ')}</div>`;
+                html += `</details>`;
+            }
+
+            return html;
+        }
+
+        function extractComplianceData(data) {
+            // Detect compliance validation response
+            const d = data.data || data;
+            if (d.overall_compliance_percent !== undefined && d.failed_components) return d;
+            return null;
+        }
+
+        function renderComplianceTable(comp) {
+            const pct = comp.overall_compliance_percent;
+            const pctColor = pct >= 80 ? '#90EE90' : pct >= 50 ? '#ffd93d' : '#ff6b6b';
+
+            // Summary bar
+            let html = `<div class="bom-summary">`;
+            html += `Compliance: <strong style="color:${pctColor};">${pct}%</strong>`;
+            html += ` | <strong style="color:#90EE90;">${comp.passed_requirements}</strong> passed`;
+            html += ` | <strong style="color:#ff6b6b;">${comp.failed_requirements}</strong> failed`;
+            html += ` | ${comp.total_requirements} total requirements`;
+            html += `</div>`;
+
+            // Failed components table
+            if (comp.failed_components && comp.failed_components.length > 0) {
+                html += `<div class="bom-table-wrap"><table class="bom-table">`;
+                html += `<thead><tr>`;
+                html += `<th>Component</th><th>Part Number</th><th>Category</th>`;
+                html += `<th>Failed Req</th><th>Type</th><th>Actual</th><th>Required</th><th>Details</th>`;
+                html += `</tr></thead><tbody>`;
+
+                comp.failed_components.forEach(fc => {
+                    const details = fc.failure_details || [];
+                    if (details.length === 0) {
+                        html += `<tr>`;
+                        html += `<td><strong style="color:#4ecdc4;">${escapeHtml(fc.component_id)}</strong></td>`;
+                        html += `<td style="color:#ffd93d;">${escapeHtml(fc.part_number || '-')}</td>`;
+                        html += `<td>${escapeHtml(fc.category || '-')}</td>`;
+                        html += `<td><span class="compliant-no">${(fc.failed_requirements || []).join(', ')}</span></td>`;
+                        html += `<td>-</td><td>-</td><td>-</td><td>-</td>`;
+                        html += `</tr>`;
+                    } else {
+                        details.forEach((d, i) => {
+                            html += `<tr>`;
+                            if (i === 0) {
+                                html += `<td rowspan="${details.length}"><strong style="color:#4ecdc4;">${escapeHtml(fc.component_id)}</strong></td>`;
+                                html += `<td rowspan="${details.length}" style="color:#ffd93d;">${escapeHtml(fc.part_number || '-')}</td>`;
+                                html += `<td rowspan="${details.length}">${escapeHtml(fc.category || '-')}</td>`;
+                            }
+                            const reqId = d.req_id || d.requirement || '-';
+                            const failType = d.type || '-';
+                            const actual = d.actual !== undefined ? formatSpecValue(d.actual) : (d.feature || '-');
+                            const required = d.required !== undefined ? formatSpecValue(d.required) : '-';
+                            const msg = d.message || d.note || '';
+                            const typeColor = failType === 'GAP' ? '#ff9800' : '#ff6b6b';
+                            html += `<td><span class="compliant-no">${escapeHtml(reqId)}</span></td>`;
+                            html += `<td style="color:${typeColor};">${escapeHtml(failType)}</td>`;
+                            html += `<td>${escapeHtml(actual)}</td>`;
+                            html += `<td>${escapeHtml(required)}</td>`;
+                            html += `<td style="font-size:0.85em;color:#aaa;">${escapeHtml(msg)}</td>`;
+                            html += `</tr>`;
+                        });
+                    }
+                });
+
+                html += `</tbody></table></div>`;
+            }
+
+            // Compliant components
+            if (comp.compliant_components && comp.compliant_components.length > 0) {
+                html += `<div style="margin-top:10px;">`;
+                html += `<strong style="color:#90EE90;">Compliant Components:</strong> `;
+                html += comp.compliant_components.map(c => `<span style="color:#4ecdc4;">${escapeHtml(c)}</span>`).join(', ');
+                html += `</div>`;
+            }
+
+            return html;
+        }
+
+        function formatSpecKey(key) {
+            // Convert snake_case to Title Case
+            return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        function formatSpecValue(val) {
+            if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+            if (typeof val === 'number') return String(val);
+            if (typeof val === 'object') return JSON.stringify(val);
+            return String(val);
+        }
+
+        function formatJson(obj, indent = 0) {
+            if (obj === null) return '<span class="json-null">null</span>';
+            if (typeof obj === 'boolean') return `<span class="json-boolean">${obj}</span>`;
+            if (typeof obj === 'number') return `<span class="json-number">${obj}</span>`;
+            if (typeof obj === 'string') return `<span class="json-string">"${escapeHtml(obj)}"</span>`;
+
+            const pad = '  '.repeat(indent);
+            const padNext = '  '.repeat(indent + 1);
+
+            if (Array.isArray(obj)) {
+                if (obj.length === 0) return '[]';
+                const items = obj.map(item => padNext + formatJson(item, indent + 1)).join(',\n');
+                return `[\n${items}\n${pad}]`;
+            }
+
+            const keys = Object.keys(obj);
+            if (keys.length === 0) return '{}';
+            const items = keys.map(key =>
+                `${padNext}<span class="json-key">"${escapeHtml(key)}"</span>: ${formatJson(obj[key], indent + 1)}`
+            ).join(',\n');
+            return `{\n${items}\n${pad}}`;
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function showTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tab}`).classList.add('active');
+        }
+
+        function toggleFocusMode() {
+            const mode = document.getElementById('focus-mode').value;
+            document.getElementById('focus-dropdown').style.display = mode === 'index' ? 'block' : 'none';
+            document.getElementById('focus-component').style.display = mode === 'direct' ? 'block' : 'none';
+            // Show/hide topology selection based on mode
+            if (mode === 'index') {
+                populateTopologySelect(); // This will show/hide based on available topologies
+            } else {
+                populateFocusComponentDropdown();
+                document.getElementById('topology-selection').style.display = 'none';
+            }
+        }
+
+        function populateTopologySelect() {
+            const dropdown = document.getElementById('focus-dropdown');
+            const topologySelect = document.getElementById('topology-select');
+            const topologySection = document.getElementById('topology-selection');
+            const recs = workflowSelections.recommendations || [];
+
+            console.log('populateTopologySelect called, dropdown.value:', dropdown.value, 'recs:', recs.length);
+
+            if (!dropdown.value && dropdown.value !== '0' && dropdown.value !== 0) {
+                topologySelect.innerHTML = '';
+                topologySection.style.display = 'none';
+                return;
+            }
+
+            if (!recs.length) {
+                topologySelect.innerHTML = '';
+                topologySection.style.display = 'none';
+                return;
+            }
+
+            const index = parseInt(dropdown.value);
+            const rec = recs[index];
+            const alts = rec?.alternatives || [];
+
+            console.log('Selected rec index:', index, 'alternatives:', alts.length);
+
+            topologySelect.innerHTML = '';
+            if (!alts.length) {
+                topologySelect.innerHTML = '<option disabled>No alternatives found</option>';
+                topologySection.style.display = 'block';
+                return;
+            }
+
+            // Extract unique topologies from alternatives
+            const topologies = [...new Set(alts.map(a => {
+                const topo = a.topology || a.name;
+                console.log('Alt:', a.name, 'topology:', a.topology, 'using:', topo);
+                return topo;
+            }).filter(Boolean))];
+
+            console.log('Found topologies:', topologies);
+
+            if (topologies.length === 0) {
+                topologySelect.innerHTML = '<option disabled>No topologies in alternatives</option>';
+                topologySection.style.display = 'block';
+                return;
+            }
+
+            topologies.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t;
+                opt.textContent = t;
+                opt.selected = true; // Select all by default
+                topologySelect.appendChild(opt);
+            });
+
+            topologySection.style.display = 'block';
+        }
+
+        function selectAllTopologies() {
+            const select = document.getElementById('topology-select');
+            for (let opt of select.options) opt.selected = true;
+        }
+
+        function clearTopologySelection() {
+            const select = document.getElementById('topology-select');
+            for (let opt of select.options) opt.selected = false;
+        }
+
+        function getSelectedTopologies() {
+            const select = document.getElementById('topology-select');
+            const selected = [];
+            for (let opt of select.selectedOptions) {
+                selected.push(opt.value);
+            }
+            return selected.length > 0 ? selected : 'all';
+        }
+
+        function populateFocusDropdown(recs) {
+            const dropdown = document.getElementById('focus-dropdown');
+            dropdown.innerHTML = '';
+            if (!recs.length) {
+                dropdown.innerHTML = '<option value="" disabled selected>Run Recommend first...</option>';
+                document.getElementById('topology-selection').style.display = 'none';
+                return;
+            }
+            recs.forEach((rec, i) => {
+                const opt = document.createElement('option');
+                opt.value = i;
+                const id = rec.component_id || 'Component ' + i;
+                const part = rec.current_part ? ` (${rec.current_part})` : '';
+                const altCount = (rec.alternatives || []).length;
+                opt.textContent = `${id}${part} — ${altCount} alternatives`;
+                dropdown.appendChild(opt);
+            });
+            // Sync dropdown to currently focused component, or default to first
+            const focusedComponent = workflowSelections.selected_component;
+            let selectedIdx = 0;
+            if (focusedComponent) {
+                const matchIdx = recs.findIndex(r => r.component_id === focusedComponent);
+                if (matchIdx >= 0) selectedIdx = matchIdx;
+            }
+            if (recs.length > 0) {
+                dropdown.selectedIndex = selectedIdx;
+                populateTopologySelect();
+            }
+        }
+
+        function populateAlternativesDropdown(alts) {
+            const dropdown = document.getElementById('alt-dropdown');
+            dropdown.innerHTML = '';
+            if (!alts.length) {
+                dropdown.innerHTML = '<option value="" disabled selected>Run Explore first...</option>';
+                return;
+            }
+            alts.forEach((alt, i) => {
+                const opt = document.createElement('option');
+                opt.value = i;
+                const name = alt.name || alt.part_number || 'Alternative ' + i;
+                const pn = alt.part_number && alt.name ? ` (${alt.part_number})` : '';
+                const cat = alt.category ? ` [${alt.category}]` : '';
+                opt.textContent = `${name}${pn}${cat}`;
+                dropdown.appendChild(opt);
+            });
+        }
+
+        async function populateFFFDropdown() {
+            const dropdown = document.getElementById('fff-component-id');
+            if (!sessionId || !bomLoaded) {
+                dropdown.innerHTML = '<option value="" disabled selected>Load BOM first...</option>';
+                bomComponents = [];
+                return;
+            }
+            try {
+                const resp = await fetch(`${getBaseUrl()}/api/sessions/${sessionId}/bom`, {
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const comps = data.components || [];
+                    bomComponents = comps;
+                    dropdown.innerHTML = '';
+                    if (!comps.length) {
+                        dropdown.innerHTML = '<option value="" disabled selected>No components in BOM</option>';
+                        return;
+                    }
+                    comps.forEach(c => {
+                        const opt = document.createElement('option');
+                        const compId = c.component_id || c.name || c.id;
+                        opt.value = compId;
+                        const part = c.part_number ? ` (${c.part_number})` : '';
+                        const cat = c.category ? ` [${c.category}]` : '';
+                        opt.textContent = `${compId}${part}${cat}`;
+                        dropdown.appendChild(opt);
+                    });
+                    // Pre-select focused component if any
+                    const focused = workflowSelections.selected_component;
+                    if (focused) {
+                        dropdown.value = focused;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to populate FFF dropdown:', e);
+            }
+        }
+
+        function populateFocusComponentDropdown() {
+            const dropdown = document.getElementById('focus-component');
+            if (!bomComponents.length) {
+                dropdown.innerHTML = '<option value="" disabled selected>Load BOM first...</option>';
+                return;
+            }
+            dropdown.innerHTML = '';
+            bomComponents.forEach(c => {
+                const opt = document.createElement('option');
+                const compId = c.component_id || c.name || c.id;
+                opt.value = compId;
+                const part = c.part_number ? ` (${c.part_number})` : '';
+                const cat = c.category ? ` [${c.category}]` : '';
+                opt.textContent = `${compId}${part}${cat}`;
+                dropdown.appendChild(opt);
+            });
+            // Pre-select focused component if any
+            const focused = workflowSelections.selected_component;
+            if (focused) dropdown.value = focused;
+        }
+
+        function updateState(selections) {
+            workflowSelections = selections || {};
+
+            document.getElementById('state-session').textContent = sessionId || 'Not set';
+            document.getElementById('state-session').classList.toggle('empty', !sessionId);
+
+            document.getElementById('state-bom').textContent = bomLoaded ? 'Loaded' : 'Not loaded';
+            document.getElementById('state-bom').classList.toggle('empty', !bomLoaded);
+
+            const bomVersion = workflowSelections.current_bom_version;
+            document.getElementById('state-bom-version').textContent = bomVersion ? `v${bomVersion}` : '-';
+            document.getElementById('state-bom-version').classList.toggle('empty', !bomVersion);
+
+            const recs = workflowSelections.recommendations || [];
+            document.getElementById('state-recommendations').textContent = recs.length ? `${recs.length} recommendations` : 'None';
+            document.getElementById('state-recommendations').classList.toggle('empty', !recs.length);
+            renderRecommendationsList(recs);
+            populateFocusDropdown(recs);
+
+            const comp = workflowSelections.selected_component;
+            document.getElementById('state-component').textContent = comp || 'None';
+            document.getElementById('state-component').classList.toggle('empty', !comp);
+
+            const topos = workflowSelections.selected_topologies || [];
+            document.getElementById('state-topologies').textContent = topos.length ? topos.join(', ') : 'None';
+            document.getElementById('state-topologies').classList.toggle('empty', !topos.length);
+
+            const alts = workflowSelections.explored_alternatives || [];
+            document.getElementById('state-alternatives').textContent = alts.length ? `${alts.length} alternatives` : 'None';
+            document.getElementById('state-alternatives').classList.toggle('empty', !alts.length);
+            renderAlternativesList(alts);
+            populateAlternativesDropdown(alts);
+
+            const selAlt = workflowSelections.selected_alternative;
+            document.getElementById('state-selected-alt').textContent = selAlt ? (selAlt.name || selAlt.part_number || 'Selected') : 'None';
+            document.getElementById('state-selected-alt').classList.toggle('empty', !selAlt);
+
+            const specs = workflowSelections.suggested_specs;
+            document.getElementById('state-specs').textContent = specs ? 'Generated' : 'None';
+            document.getElementById('state-specs').classList.toggle('empty', !specs);
+
+            // Target Specs display
+            const targetSpecs = workflowSelections.target_specs || {};
+            const targetTopos = Object.keys(targetSpecs);
+            const tsEl = document.getElementById('state-target-specs');
+            const tsDetail = document.getElementById('target-specs-detail');
+            if (targetTopos.length > 0) {
+                tsEl.textContent = `${targetTopos.length} topology target(s)`;
+                tsEl.classList.remove('empty');
+                // Render detail per topology
+                let detailHtml = '';
+                targetTopos.forEach(topo => {
+                    let specs = targetSpecs[topo];
+                    // Normalize: agent may save specs as array instead of object
+                    if (Array.isArray(specs)) {
+                        specs = normalizeTargetSpecs(specs);
+                    }
+                    const paramKeys = Object.keys(specs);
+                    detailHtml += `<div style="background:#0a0a15;padding:6px 8px;border-radius:3px;margin:3px 0;">`;
+                    detailHtml += `<strong style="color:#4ecdc4;">${escapeHtml(topo)}</strong>`;
+                    detailHtml += `<span style="color:#666;font-size:0.8em;margin-left:6px;">(${paramKeys.length} params)</span>`;
+                    detailHtml += `<div style="font-size:0.8em;color:#aaa;margin-top:3px;">`;
+                    paramKeys.slice(0, 5).forEach(param => {
+                        const s = specs[param];
+                        detailHtml += `<div>${escapeHtml(param)}: ${formatTargetSpecValue(s)}</div>`;
+                    });
+                    if (paramKeys.length > 5) {
+                        detailHtml += `<div style="color:#666;">+${paramKeys.length - 5} more...</div>`;
+                    }
+                    detailHtml += `</div></div>`;
+                });
+                tsDetail.innerHTML = detailHtml;
+                tsDetail.style.display = 'block';
+            } else {
+                tsEl.textContent = 'None';
+                tsEl.classList.add('empty');
+                tsDetail.innerHTML = '';
+                tsDetail.style.display = 'none';
+            }
+
+            // Auto-populate target topology input from selected topologies
+            const targetTopoInput = document.getElementById('target-topology');
+            if (targetTopoInput && !targetTopoInput.value) {
+                const selectedTopos = workflowSelections.selected_topologies || [];
+                if (selectedTopos.length === 1) {
+                    targetTopoInput.value = selectedTopos[0];
+                }
+            }
+
+            updateQuickActions();
+        }
+
+        function renderRecommendationsList(recs) {
+            const container = document.getElementById('recommendations-list');
+            if (!recs.length) {
+                container.innerHTML = '';
+                return;
+            }
+            container.innerHTML = recs.map((rec, i) => {
+                const id = rec.component_id || rec.name || 'Component ' + i;
+                const part = rec.current_part ? ` (${rec.current_part})` : '';
+                const fails = rec.fails_requirements ? '<span class="badge count">FAILS</span>' : '';
+                const altCount = (rec.alternatives || []).length;
+                const altBadge = altCount ? `<span class="badge">${altCount} alts</span>` : '';
+                return `
+                    <div class="rec-item" onclick="toggleRecDetail(${i})" id="rec-item-${i}">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span><strong>${id}</strong>${part}</span>
+                            <span>${fails}${altBadge}
+                                <button class="small" onclick="event.stopPropagation();selectRecommendationFromList(${i})" style="margin-left:4px;">Set Focus</button>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="rec-detail" id="rec-detail-${i}" style="display:none;"></div>
+                `;
+            }).join('');
+        }
+
+        function toggleRecDetail(index) {
+            const detail = document.getElementById('rec-detail-' + index);
+            const item = document.getElementById('rec-item-' + index);
+            if (detail.style.display !== 'none') {
+                detail.style.display = 'none';
+                item.classList.remove('selected');
+                return;
+            }
+            // Collapse others
+            document.querySelectorAll('.rec-detail').forEach(d => d.style.display = 'none');
+            document.querySelectorAll('.rec-item').forEach(d => d.classList.remove('selected'));
+            item.classList.add('selected');
+            detail.style.display = 'block';
+
+            const recs = workflowSelections.recommendations || [];
+            const rec = recs[index];
+            if (!rec) { detail.innerHTML = '<em>No data</em>'; return; }
+
+            let html = '';
+            if (rec.fails_requirements && (rec.failed_requirements || []).length) {
+                html += `<div style="color:#ff6b6b;margin-bottom:6px;">Failed: ${rec.failed_requirements.join(', ')}</div>`;
+            }
+
+            const alts = rec.alternatives || [];
+            if (!alts.length) {
+                html += '<div style="color:#888;">No alternatives listed</div>';
+            } else {
+                html += `<div style="color:#888;margin-bottom:4px;">${alts.length} alternative(s):</div>`;
+                alts.forEach(alt => {
+                    const name = alt.name || alt.part_number || '?';
+                    const pn = alt.part_number && alt.name ? ` (${alt.part_number})` : '';
+                    const mfr = alt.manufacturer ? ` — ${alt.manufacturer}` : '';
+                    const cat = alt.category ? `<span class="badge">${alt.category}</span>` : '';
+                    const ev = alt.exploration_value ? `<span class="badge">${alt.exploration_value}</span>` : '';
+                    const pros = (alt.pros || []).map(p => `<span class="pros">+ ${escapeHtml(p)}</span>`).join('<br>');
+                    const cons = (alt.cons || []).map(c => `<span class="cons">- ${escapeHtml(c)}</span>`).join('<br>');
+                    html += `<div class="alt-row">
+                        <strong>${escapeHtml(name)}</strong>${pn}${mfr} ${cat} ${ev}
+                        ${pros ? '<br>' + pros : ''}
+                        ${cons ? '<br>' + cons : ''}
+                    </div>`;
+                });
+            }
+            detail.innerHTML = html;
+        }
+
+        function renderAlternativesList(alts) {
+            const container = document.getElementById('alternatives-list');
+            if (!alts.length) {
+                container.innerHTML = '';
+                return;
+            }
+            const comp = workflowSelections.selected_component || '';
+            container.innerHTML = `<div style="max-height:350px;overflow-y:auto;border:1px solid #333;border-radius:4px;padding:4px;">` +
+                alts.map((alt, i) => {
+                    const partNum = alt.part_number || alt.PartNumber || alt.name || '';
+                    const mfr = alt.manufacturer || alt.Manufacturer || '';
+                    // Handle both snake_case and PascalCase from Tavily
+                    const datasheetUrl = alt.datasheet_url || alt.DatasheetURL || '';
+                    const verified = alt.verified ?? (alt.DatasheetVerified === 'verified');
+                    const verifiedStatus = alt.DatasheetVerified || (alt.verified ? 'verified' : 'unverified');
+                    const confidence = alt.Confidence ?? alt.confidence;
+                    const keySpecs = alt.KeySpecs || '';
+                    const topology = alt.topology || alt.Topology || '';
+
+                    // Verification badge
+                    let verifiedBadge = '';
+                    if (verifiedStatus === 'verified' || verified === true) {
+                        verifiedBadge = '<span class="badge" style="background:#2d5a27;color:#90EE90;">✓ Verified</span>';
+                    } else if (verifiedStatus === 'unverified') {
+                        verifiedBadge = '<span class="badge" style="background:#5a4527;color:#ffd93d;">? Unverified</span>';
+                    } else if (verifiedStatus === 'not_found') {
+                        verifiedBadge = '<span class="badge" style="background:#5a2727;color:#ff6b6b;">✗ Not Found</span>';
+                    }
+
+                    // Confidence badge
+                    let confidenceBadge = '';
+                    if (confidence !== undefined && confidence !== null) {
+                        const pct = Math.round(confidence * 100);
+                        const color = pct >= 80 ? '#90EE90' : pct >= 50 ? '#ffd93d' : '#ff6b6b';
+                        confidenceBadge = `<span style="color:${color};font-size:0.8em;margin-left:4px;">${pct}%</span>`;
+                    }
+
+                    // Datasheet link
+                    let datasheetLink = '';
+                    if (datasheetUrl) {
+                        datasheetLink = `<a href="${escapeHtml(datasheetUrl)}" target="_blank" rel="noopener" style="color:#00d9ff;font-size:0.8em;margin-left:6px;" onclick="event.stopPropagation();">📄 Datasheet</a>`;
+                    }
+
+                    return `
+                <div class="alt-item" style="padding:8px;margin:4px 0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span onclick="selectAlternativeFromList(${i})" style="cursor:pointer;flex:1;">
+                            <strong>${escapeHtml(alt.name || partNum || 'Alternative ' + i)}</strong>
+                            ${partNum && alt.name ? `<span style="color:#888;"> (${escapeHtml(partNum)})</span>` : ''}
+                            ${mfr ? `<span style="color:#666;font-size:0.85em;"> — ${escapeHtml(mfr)}</span>` : ''}
+                        </span>
+                        <span>
+                            ${verifiedBadge}${confidenceBadge}
+                            <button class="small" onclick="event.stopPropagation();consultPart('${escapeHtml(partNum)}')">Discuss</button>
+                        </span>
+                    </div>
+                    <div style="font-size:0.8em;color:#888;margin-top:4px;">
+                        ${topology ? `<span style="color:#4ecdc4;">${escapeHtml(topology)}</span> | ` : ''}
+                        ${keySpecs ? `<span>${escapeHtml(keySpecs)}</span>` : ''}
+                        ${datasheetLink}
+                    </div>
+                </div>
+            `;
+                }).join('') + `</div>
+            <div style="color:#888;font-size:0.8em;margin-top:4px;">${alts.length} alternatives — click to select, "Discuss" for engineering analysis</div>`;
+
+            // Check if last response has tavily_results and show a link to view raw data
+            if (lastResponse?.data?.tavily_results || lastResponse?.tavily_results) {
+                container.innerHTML += `<div style="margin-top:8px;">
+                    <button class="small" onclick="showTavilyRawData()">View Raw Tavily Data</button>
+                </div>`;
+            }
+        }
+
+        // consultPart is defined in the discuss modal script block below
+
+        function showTavilyRawData() {
+            const tavilyData = lastResponse?.data?.tavily_results || lastResponse?.tavily_results;
+            if (!tavilyData) {
+                alert('No Tavily data available in last response');
+                return;
+            }
+            // Show in a modal or switch to raw tab
+            document.getElementById('response-raw').textContent = JSON.stringify(tavilyData, null, 2);
+            // Switch to raw tab
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab')[1].classList.add('active'); // Raw JSON tab
+            document.getElementById('tab-raw').classList.add('active');
+            // Scroll to response panel
+            document.querySelector('.panel-response').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function selectRecommendationFromList(index) {
+            document.getElementById('focus-mode').value = 'index';
+            toggleFocusMode();
+            document.getElementById('focus-dropdown').value = String(index);
+            populateTopologySelect();
+            setFocus();
+        }
+
+        function selectAlternativeFromList(index) {
+            document.getElementById('alt-dropdown').value = index;
+            selectAlternative();
+        }
+
+        function updateQuickActions() {
+            const primary = [];
+            const always = [];
+
+            if (!sessionId) {
+                primary.push('<button onclick="createSession()">Create Session</button>');
+            } else if (!bomLoaded) {
+                primary.push('<button onclick="document.getElementById(\'bom-file\').click()">Load BOM</button>');
+            } else {
+                // Stage-specific primary actions
+                const hasTargetSpecs = Object.keys(workflowSelections.target_specs || {}).length > 0;
+                if (!workflowSelections.selected_component) {
+                    primary.push('<button onclick="callRecommend()">Get Recommendations</button>');
+                    primary.push('<button onclick="document.getElementById(\'focus-mode\').value=\'direct\';toggleFocusMode();document.getElementById(\'focus-component\').focus()">Set Focus Directly</button>');
+                } else if (!(workflowSelections.explored_alternatives || []).length) {
+                    if (!hasTargetSpecs) {
+                        primary.push('<button onclick="document.getElementById(\'step-target-specs\').scrollIntoView({behavior:\'smooth\'})">Set Target Specs First</button>');
+                    }
+                    primary.push(`<button onclick="callExplore()">Explore ${workflowSelections.selected_component}${hasTargetSpecs ? ' (with targets)' : ''}</button>`);
+                } else if (!workflowSelections.selected_alternative) {
+                    primary.push('<button onclick="selectAlternative()">Select Alternative</button>');
+                } else if (!workflowSelections.suggested_specs) {
+                    primary.push('<button onclick="suggestSpecs()">Suggest Specs</button>');
+                    primary.push('<button onclick="applyReplacement()" class="secondary">Apply Directly</button>');
+                } else {
+                    primary.push('<button onclick="applyReplacement()" class="secondary">Apply Replacement</button>');
+                }
+
+                // Target specs hint
+                if (workflowSelections.selected_component && hasTargetSpecs) {
+                    const topoCount = Object.keys(workflowSelections.target_specs).length;
+                    primary.push(`<span style="color:#ffd93d;font-size:0.8em;margin-left:8px;">Target specs set for ${topoCount} topology(ies)</span>`);
+                }
+
+                // Always-available actions (after BOM loaded)
+                always.push('<button onclick="callConsult()" class="small" style="background:#2a4a2a;border-color:#4ecdc4;">Consult</button>');
+                always.push('<button onclick="callCompliance()" class="small" style="background:#4a2a2a;border-color:#ff6b6b;">Validate Compliance</button>');
+                always.push('<button onclick="callSearch()" class="small">Search</button>');
+            }
+
+            let html = primary.join(' ');
+            if (always.length) {
+                html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #333;">'
+                    + '<span style="color:#666;font-size:0.75em;">Available anytime: </span>'
+                    + always.join(' ')
+                    + '</div>';
+            }
+
+            // Show compliance hint if last action was apply-replacement
+            if (lastResponse?.data?._hint) {
+                html += `<div style="margin-top:8px;padding:8px;background:#3a3a1a;border:1px solid #ffd93d;border-radius:4px;font-size:0.85em;color:#ffd93d;">${lastResponse.data._hint}</div>`;
+            }
+
+            document.getElementById('quick-actions').innerHTML = html || '<p style="color: #666; font-size: 0.85em;">Workflow complete - start new cycle</p>';
+        }
+
+        // Mock API Responses
+        function getMockResponse(method, endpoint, body) {
+            // Health check
+            if (endpoint === '/api/health') {
+                return { ok: true, data: { status: 'healthy', version: '1.0.0', timestamp: new Date().toISOString() } };
+            }
+            
+            // Create session
+            if (method === 'POST' && endpoint === '/api/sessions') {
+                return { ok: true, data: { session_id: 'mock-session-' + Date.now(), user_id: body?.user_id || 'test_user' } };
+            }
+            
+            // Get workflow/selections
+            if (endpoint.includes('/selections')) {
+                return { ok: true, data: workflowSelections };
+            }
+            
+            // Get BOM
+            if (endpoint.includes('/bom')) {
+                return {
+                    ok: true,
+                    data: {
+                        version: workflowSelections.current_bom_version || 1,
+                        subsystem_name: 'Power Management',
+                        components: bomComponents.length > 0 ? bomComponents : MOCK_BOM_COMPONENTS
+                    }
+                };
+            }
+            
+            // Recommend
+            if (endpoint.includes('/recommend')) {
+                return {
+                    ok: true,
+                    data: {
+                        data: {
+                            recommendations: workflowSelections.recommendations || MOCK_SCENARIOS.success.selections.recommendations
+                        }
+                    }
+                };
+            }
+            
+            // Set focus
+            if (endpoint.includes('/set-focus')) {
+                const newSelections = { ...workflowSelections };
+                if (body.index !== undefined) {
+                    const recs = workflowSelections.recommendations || [];
+                    if (recs[body.index]) {
+                        newSelections.selected_component = recs[body.index].component_id;
+                        newSelections.selected_topologies = body.topologies || ['synchronous_buck'];
+                    }
+                } else if (body.component_id) {
+                    newSelections.selected_component = body.component_id;
+                }
+                workflowSelections = newSelections;
+                updateState(workflowSelections);
+                return { ok: true, data: workflowSelections };
+            }
+            
+            // Explore
+            if (endpoint.includes('/explore')) {
+                return {
+                    ok: true,
+                    data: {
+                        data: {
+                            alternatives: workflowSelections.explored_alternatives || MOCK_SCENARIOS.success.selections.explored_alternatives,
+                            tavily_results: [
+                                { PartNumber: 'TPS54302DDAR', Manufacturer: 'Texas Instruments', DatasheetURL: 'https://www.ti.com/lit/ds/symlink/tps54302.pdf', DatasheetVerified: 'verified', Confidence: 0.95 }
+                            ]
+                        }
+                    }
+                };
+            }
+            
+            // Select alternative
+            if (endpoint.includes('/select-alternative')) {
+                const alts = workflowSelections.explored_alternatives || [];
+                const alt = alts[body.alternative_index];
+                if (alt) {
+                    workflowSelections.selected_alternative = alt;
+                    updateState(workflowSelections);
+                }
+                return { ok: true, data: workflowSelections };
+            }
+            
+            // Suggest specs
+            if (endpoint.includes('/suggest-specs')) {
+                const specs = body.mode === 'fff' 
+                    ? { output_voltage: { value: 5, unit: 'V', tolerance_type: 'exact', fff_category: 'form' } }
+                    : { output_voltage: { value: 5, unit: 'V', tolerance_type: 'exact' }, output_current: { value: 3, unit: 'A', tolerance_type: 'minimum' } };
+                return {
+                    ok: true,
+                    data: {
+                        data: {
+                            target_specs: specs,
+                            topology: body.topology || 'synchronous_buck'
+                        }
+                    }
+                };
+            }
+            
+            // Apply replacement
+            if (endpoint.includes('/apply-replacement')) {
+                workflowSelections.current_bom_version = (workflowSelections.current_bom_version || 1) + 1;
+                workflowSelections.selected_alternative = null;
+                workflowSelections.explored_alternatives = [];
+                updateState(workflowSelections);
+                return {
+                    ok: true,
+                    data: {
+                        data: {
+                            new_version: workflowSelections.current_bom_version,
+                            _hint: '✅ Replacement applied! New BOM version created. Run Compliance check to validate.'
+                        }
+                    }
+                };
+            }
+            
+            // Compliance
+            if (endpoint.includes('/validate-compliance')) {
+                return { ok: true, data: MOCK_SCENARIOS.compliance_fail.response };
+            }
+            
+            // Target specs
+            if (endpoint.includes('/target-specs')) {
+                if (method === 'GET') {
+                    return { ok: true, data: { target_specs: workflowSelections.target_specs || {} } };
+                } else if (method === 'POST') {
+                    const topo = endpoint.split('/target-specs/')[1]?.split('?')[0];
+                    if (topo && body.target_specs) {
+                        if (!workflowSelections.target_specs) workflowSelections.target_specs = {};
+                        workflowSelections.target_specs[decodeURIComponent(topo)] = body.target_specs;
+                        updateState(workflowSelections);
+                    }
+                    return { ok: true, data: { target_specs: workflowSelections.target_specs } };
+                }
+            }
+            
+            // Chat endpoints - return markdown response
+            if (endpoint.includes('/chat/')) {
+                return {
+                    ok: true,
+                    data: {
+                        mode: 'chat',
+                        response: MOCK_SCENARIOS.chat_response.response.response
+                    }
+                };
+            }
+            
+            // Default success
+            return { ok: true, data: { message: 'Mock response', endpoint, method } };
+        }
+
+        // API Calls
+        async function apiCall(method, endpoint, body = null, loadingMsg = 'Processing...') {
+            const url = `${getBaseUrl()}${endpoint}`;
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+            };
+            if (body) options.body = JSON.stringify(body);
+
+            document.getElementById('debug-last-call').textContent = `${method} ${endpoint}`;
+            showLoading(loadingMsg);
+            const startTime = Date.now();
+
+            // Use mock responses if mock mode is enabled or if session starts with 'mock-'
+            if (mockMode || sessionId.startsWith('mock-')) {
+                await new Promise(resolve => setTimeout(resolve, 300 + Math.random() * 500)); // Simulate network delay
+                const elapsed = Date.now() - startTime;
+                const mockResult = getMockResponse(method, endpoint, body);
+                hideLoading();
+                showResponse(mockResult.data, mockResult.ok ? 'success' : 'error', elapsed);
+                return mockResult;
+            }
+
+            // Real API call
+            try {
+                const response = await fetch(url, options);
+                const elapsed = Date.now() - startTime;
+                const data = await response.json();
+                hideLoading();
+                showResponse(data, response.ok ? 'success' : 'error', elapsed);
+                return { ok: response.ok, data };
+            } catch (error) {
+                const elapsed = Date.now() - startTime;
+                hideLoading();
+                showResponse({ error: error.message }, 'error', elapsed);
+                return { ok: false, data: { error: error.message } };
+            }
+        }
+
+        async function checkHealth() {
+            await apiCall('GET', '/api/health', null, 'Checking health...');
+        }
+
+        async function createSession() {
+            const result = await apiCall('POST', '/api/sessions', { user_id: 'test_user' }, 'Creating session...');
+            if (result.ok && result.data.session_id) {
+                sessionId = result.data.session_id;
+                document.getElementById('session-id').value = sessionId;
+                bomLoaded = false;
+                updateState({});
+            }
+        }
+
+        async function loadBOM() {
+            if (!sessionId) {
+                alert('Create a session first');
+                return;
+            }
+            const fileInput = document.getElementById('bom-file');
+            if (!fileInput.files.length) {
+                alert('Select a BOM JSON file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            showLoading('Loading BOM...');
+            const startTime = Date.now();
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/sessions/${sessionId}/load-subsystem`, {
+                    method: 'POST',
+                    body: formData,
+                });
+                const elapsed = Date.now() - startTime;
+                const data = await response.json();
+                hideLoading();
+                showResponse(data, response.ok ? 'success' : 'error', elapsed);
+                if (response.ok) {
+                    bomLoaded = true;
+                    await getWorkflow();
+                    populateFFFDropdown();
+                    populateFocusComponentDropdown();
+                }
+            } catch (error) {
+                hideLoading();
+                showResponse({ error: error.message }, 'error');
+            }
+        }
+
+        async function callRecommend() {
+            if (!sessionId) return alert('Create session first');
+            const msg = document.getElementById('recommend-msg').value;
+            const result = await apiCall('POST', `/api/agents/${sessionId}/recommend`, { message: msg }, 'Analyzing BOM for recommendations...');
+            if (result.ok) {
+                // Extract recommendations from response
+                const data = result.data.data || result.data;
+                if (data.recommendations && data.recommendations.length > 0) {
+                    console.log('Got recommendations:', data.recommendations.length);
+                } else {
+                    console.warn('No recommendations in response:', data);
+                }
+                await getWorkflow();
+            }
+        }
+
+        async function callRecommendChat() {
+            if (!sessionId) return alert('Create session first');
+            const msg = document.getElementById('recommend-msg').value;
+            await apiCall('POST', `/api/agents/${sessionId}/chat/recommend`, { message: msg }, 'Getting recommendations (chat mode)...');
+        }
+
+        async function setFocus() {
+            if (!sessionId) return alert('Create session first');
+            const mode = document.getElementById('focus-mode').value;
+            let body = {};
+            if (mode === 'index') {
+                const dropdown = document.getElementById('focus-dropdown');
+                if (!dropdown.value && dropdown.value !== '0') {
+                    alert('Select a component from the dropdown. Run Recommend first.');
+                    return;
+                }
+                body.index = parseInt(dropdown.value);
+                // Include selected topologies
+                body.topologies = getSelectedTopologies();
+            } else {
+                body.component_id = document.getElementById('focus-component').value;
+                if (!body.component_id) {
+                    alert('Select a component from the dropdown');
+                    return;
+                }
+            }
+            const result = await apiCall('POST', `/api/sessions/${sessionId}/set-focus`, body, 'Setting focus...');
+            if (result.ok) {
+                updateState(result.data);
+            }
+        }
+
+        async function callExplore() {
+            if (!sessionId) return alert('Create session first');
+            const msg = document.getElementById('explore-msg').value;
+            const comp = workflowSelections.selected_component || 'component';
+            const result = await apiCall('POST', `/api/agents/${sessionId}/explore`, { message: msg }, `Exploring alternatives for ${comp}...`);
+            if (result.ok) {
+                await getWorkflow();
+            }
+        }
+
+        async function callExploreDirect() {
+            if (!sessionId) return alert('Create session first');
+            const componentId = prompt('Enter component ID:');
+            if (!componentId) return;
+            const msg = document.getElementById('explore-msg').value;
+            const result = await apiCall('POST', `/api/agents/${sessionId}/explore/${componentId}`, { message: msg }, `Exploring alternatives for ${componentId}...`);
+            if (result.ok) {
+                await getWorkflow();
+            }
+        }
+
+        async function callExploreChat() {
+            if (!sessionId) return alert('Create session first');
+            const comp = workflowSelections.selected_component;
+            if (!comp) {
+                const componentId = prompt('No component focused. Enter component ID:');
+                if (!componentId) return;
+                const msg = document.getElementById('explore-msg').value;
+                await apiCall('POST', `/api/agents/${sessionId}/chat/explore/${componentId}`, { message: msg }, `Exploring ${componentId} (chat mode)...`);
+                return;
+            }
+            const msg = document.getElementById('explore-msg').value;
+            await apiCall('POST', `/api/agents/${sessionId}/chat/explore/${comp}`, { message: msg }, `Exploring ${comp} (chat mode)...`);
+        }
+
+        async function selectAlternative() {
+            if (!sessionId) return alert('Create session first');
+            const dropdown = document.getElementById('alt-dropdown');
+            if (!dropdown.value && dropdown.value !== '0') {
+                alert('Select an alternative from the dropdown. Run Explore first.');
+                return;
+            }
+            const index = parseInt(dropdown.value);
+            const result = await apiCall('POST', `/api/sessions/${sessionId}/select-alternative`, { alternative_index: index }, 'Selecting alternative...');
+            if (result.ok) {
+                updateState(result.data);
+            }
+        }
+
+        async function suggestSpecs() {
+            if (!sessionId) return alert('Create session first');
+            const topology = document.getElementById('specs-topology')?.value || '';
+            const body = topology ? { topology } : {};
+            const result = await apiCall('POST', `/api/agents/${sessionId}/suggest-specs`, body, 'Generating specifications...');
+            if (result.ok) {
+                await getWorkflow();
+            }
+        }
+
+        async function suggestSpecsChat() {
+            if (!sessionId) return alert('Create session first');
+            const topology = document.getElementById('specs-topology')?.value || '';
+            const body = topology ? { topology } : {};
+            await apiCall('POST', `/api/agents/${sessionId}/chat/suggest-specs`, body, 'Generating specifications (chat mode)...');
+        }
+
+        async function applyReplacement() {
+            if (!sessionId) return alert('Create session first');
+            if (!confirm('Apply replacement? This will create a new BOM version.')) return;
+            const result = await apiCall('POST', `/api/agents/${sessionId}/apply-replacement`, {}, 'Applying replacement...');
+            if (result.ok) {
+                // Show hint before workflow refresh overwrites lastResponse
+                updateQuickActions();
+                await getWorkflow();
+            }
+        }
+
+        async function callConsult() {
+            if (!sessionId) return alert('Create session first');
+            const comp = workflowSelections.selected_component;
+            const defaultMsg = comp ? `Analyze ${comp} in the context of the current design` : 'Analyze the power subsystem';
+            const msg = prompt('Enter question:', defaultMsg);
+            if (!msg) return;
+            await apiCall('POST', `/api/agents/${sessionId}/chat/consult`, { message: msg }, 'Consulting (workflow-aware)...');
+        }
+
+        async function callCompliance() {
+            if (!sessionId) return alert('Create session first');
+            await apiCall('POST', `/api/agents/${sessionId}/validate-compliance`, {}, 'Validating compliance...');
+        }
+
+        async function callSearch() {
+            if (!sessionId) return alert('Create session first');
+            const partNumber = prompt('Enter part number to search:');
+            if (!partNumber) return;
+            await apiCall('POST', `/api/agents/${sessionId}/search`, { part_number: partNumber }, `Searching for ${partNumber}...`);
+        }
+
+        async function callVersions(action) {
+            if (!sessionId) return alert('Create session first');
+            let body = {};
+            if (action === 'rollback') {
+                const version = prompt('Enter version number to rollback to:');
+                if (!version) return;
+                body.version = parseInt(version);
+            }
+            await apiCall('POST', `/api/agents/${sessionId}/versions/${action}`, body, `Versions: ${action}...`);
+        }
+
+        async function getWorkflow() {
+            // Fetch workflow state silently without overwriting the response panel
+            if (!sessionId) return;
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/sessions/${sessionId}/selections`, {
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    updateState(data);
+                }
+            } catch (e) {
+                console.warn('Failed to refresh workflow state:', e);
+            }
+        }
+
+        async function clearWorkflow() {
+            if (!sessionId) return alert('Create session first');
+            if (!confirm('Clear workflow history?')) return;
+            const result = await apiCall('POST', `/api/sessions/${sessionId}/workflow/clear`, {}, 'Clearing workflow...');
+            if (result.ok) {
+                updateState(result.data.selections || {});
+            }
+        }
+
+        async function getBOM() {
+            if (!sessionId) return alert('Create session first');
+            const result = await apiCall('GET', `/api/sessions/${sessionId}/bom`, null, 'Fetching BOM...');
+            if (result.ok && result.data) {
+                try {
+                    const comps = result.data.components || [];
+                    if (comps.length > 0) {
+                        const html = renderBomTable(result.data, comps);
+                        const el = document.getElementById('response-formatted');
+                        el.innerHTML = html;
+                        // Force the formatted tab to be visible
+                        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                        document.querySelector('.tab').classList.add('active');
+                        document.getElementById('tab-formatted').classList.add('active');
+                    }
+                } catch (e) {
+                    alert('BOM table render error: ' + e.message);
+                    console.error('BOM table error:', e);
+                }
+            }
+        }
+
+        // --- Target Specs Helpers ---
+
+        function formatTargetSpecValue(spec) {
+            if (!spec || typeof spec !== 'object') return String(spec || '-');
+            const val = spec.value !== undefined ? spec.value : '?';
+            const unit = spec.unit || '';
+            const tolType = spec.tolerance_type || 'exact';
+            if (tolType === 'percentage') {
+                const tol = spec.tolerance || '';
+                return `${val}${unit} ${tol}`;
+            } else if (tolType === 'minimum') {
+                const minVal = spec.min !== undefined ? spec.min : val;
+                return `≥${minVal}${unit}`;
+            } else if (tolType === 'range') {
+                return `${spec.min || '?'}–${spec.max || '?'}${unit}`;
+            } else {
+                return `${val}${unit} (exact)`;
+            }
+        }
+
+        // Store last suggested target specs for accept flow
+        let pendingTargetSpecs = null;
+        let pendingTargetTopology = null;
+
+        // Normalize target specs: if agent returned a list, convert to dict keyed by param name
+        function normalizeTargetSpecs(specs) {
+            if (!specs) return {};
+            if (Array.isArray(specs)) {
+                const dict = {};
+                specs.forEach((item, i) => {
+                    if (typeof item === 'object' && item !== null) {
+                        // Try to find a param name key
+                        const key = item.param_name || item.parameter || item.name || item.spec_name || `param_${i}`;
+                        // Remove the key field from the value since it's now the dict key
+                        const { param_name, parameter, name, spec_name, ...rest } = item;
+                        dict[key] = rest;
+                    }
+                });
+                return dict;
+            }
+            if (typeof specs === 'object') return specs;
+            return {};
+        }
+
+        async function suggestTargetSpecs() {
+            if (!sessionId) return alert('Create session first');
+            const topology = document.getElementById('target-topology').value.trim();
+            if (!topology) return alert('Enter a topology name (e.g., synchronous_buck, linear_ldo)');
+            const result = await apiCall('POST', `/api/agents/${sessionId}/suggest-specs`,
+                { topology, message: '' },
+                `Suggesting target specs for ${topology}...`
+            );
+            if (result.ok) {
+                const data = result.data.data || result.data;
+                const specs = normalizeTargetSpecs(data.target_specs);
+                if (Object.keys(specs).length > 0) {
+                    pendingTargetSpecs = specs;
+                    pendingTargetTopology = data.topology || topology;
+                    // Reset FFF-specific UI
+                    document.getElementById('review-label').textContent = 'Review suggested target specs below, then accept or modify:';
+                    document.getElementById('fff-ambiguous').style.display = 'none';
+                    // Show review panel
+                    document.getElementById('target-specs-preview').textContent = JSON.stringify(specs, null, 2);
+                    document.getElementById('target-specs-review').style.display = 'block';
+                } else {
+                    document.getElementById('target-specs-review').style.display = 'none';
+                }
+            }
+        }
+
+        async function acceptTargetSpecs() {
+            if (!sessionId) return alert('Create session first');
+            if (!pendingTargetSpecs || !pendingTargetTopology) return alert('No target specs to accept. Run Suggest first.');
+            const result = await apiCall('POST',
+                `/api/sessions/${sessionId}/target-specs/${encodeURIComponent(pendingTargetTopology)}`,
+                { target_specs: pendingTargetSpecs, source: 'agent' },
+                `Setting target specs for ${pendingTargetTopology}...`
+            );
+            if (result.ok) {
+                document.getElementById('target-specs-review').style.display = 'none';
+                pendingTargetSpecs = null;
+                pendingTargetTopology = null;
+                await getWorkflow();
+            }
+        }
+
+        async function editTargetSpecs() {
+            if (!pendingTargetSpecs || !pendingTargetTopology) return alert('No target specs to edit');
+            const edited = prompt('Edit target specs JSON:', JSON.stringify(pendingTargetSpecs, null, 2));
+            if (!edited) return;
+            try {
+                const parsed = normalizeTargetSpecs(JSON.parse(edited));
+                pendingTargetSpecs = parsed;
+                document.getElementById('target-specs-preview').textContent = JSON.stringify(parsed, null, 2);
+                // Auto-accept after editing
+                await acceptTargetSpecs();
+            } catch (e) {
+                alert('Invalid JSON: ' + e.message);
+            }
+        }
+
+        async function viewTargetSpecs() {
+            if (!sessionId) return alert('Create session first');
+            const result = await apiCall('GET',
+                `/api/sessions/${sessionId}/target-specs`,
+                null,
+                'Fetching target specs...'
+            );
+        }
+
+        async function clearTargetSpecs() {
+            if (!sessionId) return alert('Create session first');
+            const topology = document.getElementById('target-topology').value.trim();
+            if (!topology) return alert('Enter the topology to clear');
+            if (!confirm(`Clear target specs for ${topology}?`)) return;
+            const result = await apiCall('DELETE',
+                `/api/sessions/${sessionId}/target-specs/${encodeURIComponent(topology)}`,
+                null,
+                `Clearing target specs for ${topology}...`
+            );
+            if (result.ok) {
+                await getWorkflow();
+            }
+        }
+
+        async function openTargetSpecsChat() {
+            if (!sessionId) return alert('Create session first');
+            const topology = document.getElementById('target-topology').value.trim();
+            if (!topology) return alert('Enter a topology name first');
+            await chatInitialCall(
+                'component_spec_suggester',
+                `/api/agents/${sessionId}/chat/suggest-specs`,
+                { message: '', topology },
+                `Target Specs Chat: ${topology}`,
+                `Suggesting target specs for ${topology}...`
+            );
+        }
+
+        // --- FFF (Form, Fit, Function) Drop-in Mode ---
+
+        function onSpecModeChange() {
+            const mode = document.getElementById('spec-mode').value;
+            document.getElementById('topology-mode-input').style.display = mode === 'topology' ? 'flex' : 'none';
+            document.getElementById('fff-mode-input').style.display = mode === 'fff' ? 'block' : 'none';
+            document.getElementById('target-specs-review').style.display = 'none';
+            document.getElementById('fff-ambiguous').style.display = 'none';
+            // Update description
+            const desc = document.getElementById('spec-mode-desc');
+            if (mode === 'fff') {
+                desc.textContent = 'Form-Fit-Function analysis for exact drop-in replacement — "better" is NOT always compatible';
+                // Populate FFF dropdown if not already done
+                if (bomComponents.length === 0 && bomLoaded) {
+                    populateFFFDropdown();
+                }
+                // Pre-select focused component
+                const dropdown = document.getElementById('fff-component-id');
+                const focused = workflowSelections.selected_component;
+                if (focused && dropdown.querySelector(`option[value="${focused}"]`)) {
+                    dropdown.value = focused;
+                }
+            } else {
+                desc.textContent = 'Aspirational guidance with tolerances — target specs the Part Explorer should aim for';
+            }
+        }
+
+        async function suggestFFFSpecs() {
+            if (!sessionId) return alert('Create session first');
+            const compId = document.getElementById('fff-component-id').value || null;
+            if (!compId && !workflowSelections.selected_component) {
+                return alert('Select a component from the dropdown or set focus first.');
+            }
+            const label = compId || workflowSelections.selected_component;
+            const result = await apiCall('POST', `/api/agents/${sessionId}/suggest-specs`,
+                { mode: 'fff', component_id: compId, message: '' },
+                `Analyzing FFF drop-in specs for ${label}...`
+            );
+            if (result.ok) {
+                const data = result.data.data || result.data;
+                const specs = normalizeTargetSpecs(data.target_specs);
+                if (Object.keys(specs).length > 0) {
+                    pendingTargetSpecs = specs;
+                    pendingTargetTopology = data.reference_component_id || data.topology || label;
+
+                    // Update review label for FFF
+                    document.getElementById('review-label').textContent =
+                        'Review FFF drop-in replacement specs. Color-coded by category:';
+
+                    // Format with FFF categorization
+                    document.getElementById('target-specs-preview').innerHTML = formatFFFSpecs(specs);
+
+                    // Show ambiguous specs if any
+                    const ambiguous = data.ambiguous_specs || [];
+                    if (ambiguous.length > 0) {
+                        let html = '';
+                        ambiguous.forEach(a => {
+                            html += `<div style="margin:4px 0;">`;
+                            html += `<strong style="color:#ff9800;">${escapeHtml(a.param)}</strong>: ${escapeHtml(a.question)}`;
+                            if (a.default_assumption) {
+                                html += `<br><em style="color:#888;">Assumed: ${escapeHtml(a.default_assumption)}</em>`;
+                            }
+                            html += `</div>`;
+                        });
+                        document.getElementById('fff-ambiguous-list').innerHTML = html;
+                        document.getElementById('fff-ambiguous').style.display = 'block';
+                    } else {
+                        document.getElementById('fff-ambiguous').style.display = 'none';
+                    }
+
+                    // Show FFF summary if available
+                    const summary = data.fff_summary;
+                    if (summary) {
+                        const sumText = `Form: ${summary.form || 0} | Fit: ${summary.fit || 0} | Function: ${summary.function || 0}`;
+                        document.getElementById('review-label').textContent += ` [${sumText}]`;
+                    }
+
+                    document.getElementById('target-specs-review').style.display = 'block';
+                } else {
+                    document.getElementById('target-specs-review').style.display = 'none';
+                }
+            }
+        }
+
+        function formatFFFSpecs(specs) {
+            const categoryColors = { form: '#ff6b6b', fit: '#ffd93d', function: '#4ecdc4' };
+            let html = '';
+            for (const [param, spec] of Object.entries(specs)) {
+                const cat = spec.fff_category || '';
+                const color = categoryColors[cat] || '#888';
+                const val = formatTargetSpecValue(spec);
+                let compatIcon = '';
+                if (spec.better_is_compatible === false) compatIcon = ' <span style="color:#ff9800;">⚠ EXACT/BOUNDED</span>';
+                else if (spec.better_is_compatible === true) compatIcon = ' <span style="color:#90EE90;">✓ improvement OK</span>';
+
+                if (cat) {
+                    html += `<span style="color:${color};font-weight:bold;">[${cat.toUpperCase()}]</span> `;
+                }
+                html += `<strong>${escapeHtml(param)}</strong>: ${escapeHtml(val)}${compatIcon}`;
+                if (spec.compatibility_warning) {
+                    html += `\n  <span style="color:#ff9800;font-size:0.9em;">  ⚠ ${escapeHtml(spec.compatibility_warning)}</span>`;
+                }
+                if (spec.rationale) {
+                    html += `\n  <span style="color:#666;font-size:0.85em;">  ${escapeHtml(spec.rationale)}</span>`;
+                }
+                html += '\n';
+            }
+            return html;
+        }
+
+        async function openFFFSpecsChat() {
+            if (!sessionId) return alert('Create session first');
+            const compId = document.getElementById('fff-component-id').value || null;
+            if (!compId && !workflowSelections.selected_component) {
+                return alert('Select a component from the dropdown or set focus first.');
+            }
+            const label = compId || workflowSelections.selected_component;
+            await chatInitialCall(
+                'component_spec_suggester',
+                `/api/agents/${sessionId}/chat/suggest-specs`,
+                { message: '', mode: 'fff', component_id: compId },
+                `FFF Drop-in: ${label}`,
+                `Analyzing FFF specs for ${label}...`
+            );
+        }
+
+        // ===== COMPREHENSIVE MOCK DATA SYSTEM =====
+        
+        // Mock data scenarios
+        const MOCK_SCENARIOS = {
+            success: {
+                name: 'Success - Full Workflow',
+                selections: {
+                    current_bom_version: 2,
+                    recommendations: [
+                        {
+                            component_id: 'U1',
+                            current_part: 'LM2596S-5.0',
+                            fails_requirements: true,
+                            failed_requirements: ['REQ_POWER_EFFICIENCY', 'REQ_TEMP_RANGE'],
+                            alternatives: [
+                                { name: 'TPS54302', topology: 'synchronous_buck', manufacturer: 'Texas Instruments', exploration_value: 'high', pros: ['Higher efficiency', 'Smaller footprint'], cons: ['More expensive'] },
+                                { name: 'LM2596S-ADJ', topology: 'synchronous_buck', manufacturer: 'Texas Instruments', exploration_value: 'medium', pros: ['Adjustable output'], cons: ['Lower efficiency'] }
+                            ]
+                        },
+                        {
+                            component_id: 'C1',
+                            current_part: '100uF/25V',
+                            fails_requirements: false,
+                            alternatives: [
+                                { name: '120uF/35V', topology: 'capacitor', manufacturer: 'Murata', exploration_value: 'low' }
+                            ]
+                        }
+                    ],
+                    selected_component: 'U1',
+                    selected_topologies: ['synchronous_buck'],
+                    explored_alternatives: [
+                        {
+                            name: 'TPS54302',
+                            part_number: 'TPS54302DDAR',
+                            manufacturer: 'Texas Instruments',
+                            category: 'DC-DC Converter',
+                            topology: 'synchronous_buck',
+                            verified: true,
+                            confidence: 0.95,
+                            datasheet_url: 'https://www.ti.com/lit/ds/symlink/tps54302.pdf',
+                            KeySpecs: '5V, 3A, 95% efficiency'
+                        },
+                        {
+                            name: 'LM2596S-ADJ',
+                            part_number: 'LM2596S-ADJ/NOPB',
+                            manufacturer: 'Texas Instruments',
+                            category: 'DC-DC Converter',
+                            topology: 'synchronous_buck',
+                            verified: true,
+                            confidence: 0.85,
+                            datasheet_url: 'https://www.ti.com/lit/ds/symlink/lm2596.pdf',
+                            KeySpecs: 'Adjustable, 3A, 80% efficiency'
+                        }
+                    ],
+                    selected_alternative: {
+                        name: 'TPS54302',
+                        part_number: 'TPS54302DDAR'
+                    },
+                    target_specs: {
+                        synchronous_buck: {
+                            output_voltage: { value: 5, unit: 'V', tolerance_type: 'exact' },
+                            output_current: { value: 3, unit: 'A', tolerance_type: 'minimum' },
+                            efficiency: { value: 90, unit: '%', tolerance_type: 'minimum' }
+                        }
+                    }
+                },
+                response: {
+                    mode: 'info',
+                    message: '✅ Success Scenario: Full workflow with recommendations, alternatives, and target specs',
+                    data: { status: 'success', workflow_complete: true }
+                }
+            },
+            error: {
+                name: 'Error - API Failure',
+                selections: {
+                    current_bom_version: 1,
+                    recommendations: [],
+                    selected_component: null
+                },
+                response: {
+                    error: 'API connection failed',
+                    parse_error: 'Unable to reach server at http://localhost:8000',
+                    details: {
+                        code: 'CONNECTION_ERROR',
+                        message: 'Network request failed. Please check if the API server is running.',
+                        suggestion: 'Start the API server or use mock data mode'
+                    }
+                }
+            },
+            empty: {
+                name: 'Empty - No Recommendations',
+                selections: {
+                    current_bom_version: 1,
+                    recommendations: [],
+                    selected_component: null,
+                    explored_alternatives: []
+                },
+                response: {
+                    mode: 'info',
+                    message: 'No recommendations found. All components meet requirements.',
+                    data: { recommendations_count: 0, status: 'compliant' }
+                }
+            },
+            compliance_fail: {
+                name: 'Compliance - Validation Failure',
+                selections: {
+                    current_bom_version: 1,
+                    recommendations: [
+                        {
+                            component_id: 'U1',
+                            current_part: 'LM2596S-5.0',
+                            fails_requirements: true,
+                            failed_requirements: ['REQ_POWER_EFFICIENCY', 'REQ_TEMP_RANGE', 'REQ_ROHS']
+                        }
+                    ]
+                },
+                response: {
+                    data: {
+                        overall_compliance_percent: 65,
+                        passed_requirements: 13,
+                        failed_requirements: 7,
+                        total_requirements: 20,
+                        failed_components: [
+                            {
+                                component_id: 'U1',
+                                part_number: 'LM2596S-5.0',
+                                category: 'DC-DC Converter',
+                                failed_requirements: ['REQ_POWER_EFFICIENCY', 'REQ_TEMP_RANGE'],
+                                failure_details: [
+                                    {
+                                        req_id: 'REQ_POWER_EFFICIENCY',
+                                        type: 'GAP',
+                                        actual: '75%',
+                                        required: '85%',
+                                        message: 'Efficiency below minimum requirement'
+                                    },
+                                    {
+                                        req_id: 'REQ_TEMP_RANGE',
+                                        type: 'MISSING',
+                                        actual: '-40°C to +85°C',
+                                        required: '-40°C to +125°C',
+                                        message: 'Operating temperature range insufficient'
+                                    }
+                                ]
+                            }
+                        ],
+                        compliant_components: ['C1', 'C2', 'L1', 'R1', 'R2']
+                    }
+                }
+            },
+            bom_table: {
+                name: 'BOM Table - Full Component List',
+                selections: {},
+                response: {
+                    version: 1,
+                    subsystem_name: 'Power Management',
+                    components: [
+                        {
+                            component_id: 'U1',
+                            category: 'DC-DC Converter',
+                            manufacturer: 'Texas Instruments',
+                            part_number: 'LM2596S-5.0',
+                            specs: { output_voltage: '5V', output_current: '3A', efficiency: '75%' },
+                            compliant: false,
+                            failed_requirements: ['REQ_POWER_EFFICIENCY'],
+                            datasheet_url: 'https://www.ti.com/lit/ds/symlink/lm2596.pdf'
+                        },
+                        {
+                            component_id: 'C1',
+                            category: 'Capacitor',
+                            manufacturer: 'Murata',
+                            part_number: '100uF/25V',
+                            specs: { capacitance: '100uF', voltage: '25V', esr: '50mΩ' },
+                            compliant: true,
+                            datasheet_url: 'https://www.murata.com/datasheet'
+                        },
+                        {
+                            component_id: 'L1',
+                            category: 'Inductor',
+                            manufacturer: 'Coilcraft',
+                            part_number: '47uH',
+                            specs: { inductance: '47uH', current: '3A', dcr: '50mΩ' },
+                            compliant: true
+                        }
+                    ]
+                }
+            },
+            chat_response: {
+                name: 'Chat - Markdown Response',
+                selections: {},
+                response: {
+                    mode: 'chat',
+                    response: `# Analysis Results
+
+## Component: U1 (LM2596S-5.0)
+
+### Current Status
+- **Efficiency**: 75% (below requirement of 85%)
+- **Temperature Range**: -40°C to +85°C (insufficient)
+- **Compliance**: ❌ FAILS 2 requirements
+
+### Recommended Alternatives
+
+1. **TPS54302** (Recommended)
+   - Efficiency: 95%
+   - Temperature: -40°C to +125°C
+   - ✅ Meets all requirements
+   - Cost: $2.50/unit
+
+2. **LM2596S-ADJ**
+   - Efficiency: 80%
+   - Temperature: -40°C to +85°C
+   - ⚠️ Still fails temperature requirement
+
+### Next Steps
+1. Select TPS54302 as replacement
+2. Update BOM version
+3. Re-validate compliance`
+                }
+            }
+        };
+
+        // Mock BOM components (shared across scenarios)
+        const MOCK_BOM_COMPONENTS = [
+            { component_id: 'U1', part_number: 'LM2596S-5.0', category: 'DC-DC Converter', manufacturer: 'Texas Instruments' },
+            { component_id: 'C1', part_number: '100uF/25V', category: 'Capacitor', manufacturer: 'Murata' },
+            { component_id: 'L1', part_number: '47uH', category: 'Inductor', manufacturer: 'Coilcraft' },
+            { component_id: 'R1', part_number: '10k', category: 'Resistor', manufacturer: 'Vishay' },
+            { component_id: 'U2', part_number: 'LM7805', category: 'Linear Regulator', manufacturer: 'STMicroelectronics' }
+        ];
+
+        // Load mock data with scenario
+        function loadMockData(scenarioName = 'success') {
+            const scenario = MOCK_SCENARIOS[scenarioName] || MOCK_SCENARIOS.success;
+            
+            // Enable mock mode
+            mockMode = true;
+            
+            // Set mock session
+            sessionId = 'mock-session-' + Date.now();
+            document.getElementById('session-id').value = sessionId;
+            bomLoaded = true;
+            
+            // Populate BOM components
+            bomComponents = [...MOCK_BOM_COMPONENTS];
+            
+            // Update workflow selections with scenario data
+            workflowSelections = { ...scenario.selections } || {};
+            
+            // Update UI with scenario data
+            updateState(workflowSelections);
+            if (scenario.selections?.recommendations) {
+                populateFocusDropdown(scenario.selections.recommendations);
+            }
+            if (scenario.selections?.explored_alternatives) {
+                populateAlternativesDropdown(scenario.selections.explored_alternatives);
+            }
+            populateFFFDropdown();
+            populateFocusComponentDropdown();
+            
+            // Set focus mode if recommendations exist
+            if (scenario.selections?.recommendations?.length > 0) {
+                document.getElementById('focus-mode').value = 'index';
+                toggleFocusMode();
+                document.getElementById('focus-dropdown').value = '0';
+                populateTopologySelect();
+            }
+            
+            // Show scenario response
+            const status = scenarioName === 'error' ? 'error' : (scenarioName === 'chat_response' ? 'success' : 'info');
+            showResponse(scenario.response, status, 150);
+            
+            // Update mock mode indicator
+            updateMockModeIndicator();
+            
+            console.log('✅ Loaded scenario:', scenario.name, '| Mock mode:', mockMode);
+        }
+
+        // Show scenario selector
+        function showScenarioSelector() {
+            const scenarios = Object.keys(MOCK_SCENARIOS).map(key => ({
+                key,
+                ...MOCK_SCENARIOS[key]
+            }));
+            
+            let html = '<div style="position:fixed;top:60px;right:20px;z-index:1000;background:#16213e;border:2px solid #4ecdc4;border-radius:8px;padding:15px;max-width:300px;box-shadow:0 4px 12px rgba(0,0,0,0.5);">';
+            html += '<h3 style="color:#4ecdc4;margin:0 0 10px 0;font-size:1em;">Mock Scenarios</h3>';
+            scenarios.forEach(s => {
+                html += `<button onclick="loadMockData('${s.key}');document.getElementById('scenario-selector').remove();" 
+                    style="display:block;width:100%;margin:5px 0;padding:8px;background:#0f3460;border:1px solid #4ecdc4;color:#eee;border-radius:4px;cursor:pointer;text-align:left;">
+                    ${s.name}
+                </button>`;
+            });
+            html += '<button onclick="document.getElementById(\'scenario-selector\').remove();" style="margin-top:10px;width:100%;padding:6px;background:#5a2727;border:1px solid #ff6b6b;color:#ff6b6b;border-radius:4px;cursor:pointer;">Close</button>';
+            html += '</div>';
+            
+            // Remove existing selector
+            const existing = document.getElementById('scenario-selector');
+            if (existing) existing.remove();
+            
+            // Add new selector
+            const div = document.createElement('div');
+            div.id = 'scenario-selector';
+            div.innerHTML = html;
+            document.body.appendChild(div);
+        }
+
+        // Init
+        document.getElementById('session-id').addEventListener('change', (e) => {
+            sessionId = e.target.value;
+            updateState({});
+        });
+
+        // Update mock mode indicator
+        function updateMockModeIndicator() {
+            let indicator = document.getElementById('mock-mode-indicator');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.id = 'mock-mode-indicator';
+                indicator.style.cssText = 'position:fixed;top:60px;right:20px;z-index:998;padding:6px 12px;border-radius:4px;font-size:0.75em;font-weight:600;';
+                document.body.appendChild(indicator);
+            }
+            if (mockMode || sessionId.startsWith('mock-')) {
+                indicator.textContent = '🎭 MOCK MODE';
+                indicator.style.background = '#2a4a2a';
+                indicator.style.border = '2px solid #4ecdc4';
+                indicator.style.color = '#4ecdc4';
+            } else {
+                indicator.textContent = '🔌 LIVE MODE';
+                indicator.style.background = '#1a1a2e';
+                indicator.style.border = '2px solid #888';
+                indicator.style.color = '#888';
+            }
+        }
+
+        // Auto-load mock data on page load for demo
+        window.addEventListener('DOMContentLoaded', () => {
+            // Add persistent demo buttons in the header area
+            const header = document.querySelector('h1').parentElement;
+            
+            // Scenario selector button
+            const scenarioBtn = document.createElement('button');
+            scenarioBtn.textContent = '🎭 Mock Scenarios';
+            scenarioBtn.onclick = showScenarioSelector;
+            scenarioBtn.style.cssText = 'position:fixed;top:20px;right:20px;z-index:999;background:#2a4a2a;border:2px solid #4ecdc4;padding:10px 16px;font-size:0.9em;margin-left:10px;';
+            header.appendChild(scenarioBtn);
+            
+            // Quick load success button
+            const successBtn = document.createElement('button');
+            successBtn.textContent = '✅ Success';
+            successBtn.onclick = () => loadMockData('success');
+            successBtn.style.cssText = 'position:fixed;top:20px;right:180px;z-index:999;background:#2a4a2a;border:2px solid #4ecdc4;padding:10px 16px;font-size:0.9em;';
+            header.appendChild(successBtn);
+            
+            // Quick load error button
+            const errorBtn = document.createElement('button');
+            errorBtn.textContent = '❌ Error';
+            errorBtn.onclick = () => loadMockData('error');
+            errorBtn.style.cssText = 'position:fixed;top:20px;right:260px;z-index:999;background:#5a2727;border:2px solid #ff6b6b;padding:10px 16px;font-size:0.9em;';
+            header.appendChild(errorBtn);
+            
+            // Mock mode toggle
+            const toggleBtn = document.createElement('button');
+            toggleBtn.textContent = '🔀 Toggle Mock';
+            toggleBtn.onclick = () => {
+                mockMode = !mockMode;
+                updateMockModeIndicator();
+                console.log('Mock mode:', mockMode ? 'ON' : 'OFF');
+            };
+            toggleBtn.style.cssText = 'position:fixed;top:20px;right:340px;z-index:999;background:#0f3460;border:2px solid #888;padding:10px 16px;font-size:0.9em;';
+            header.appendChild(toggleBtn);
+            
+            // Auto-load success scenario after a short delay
+            setTimeout(() => {
+                loadMockData('success');
+                updateMockModeIndicator();
+            }, 500);
+        });
+
+        updateState({});
+    </script>
+
+    <!-- Universal Chat Modal -->
+    <div class="discuss-overlay" id="chat-overlay" onclick="if(event.target===this)closeChatModal()">
+        <div class="discuss-modal">
+            <div class="discuss-header">
+                <h3 id="chat-title">Chat</h3>
+                <div>
+                    <span id="chat-agent-badge" style="font-size:0.75em;color:#888;margin-right:8px;"></span>
+                    <button class="discuss-close" onclick="closeChatModal()">&times;</button>
+                </div>
+            </div>
+            <div class="discuss-messages" id="chat-messages"></div>
+            <div class="discuss-input-row">
+                <input type="text" id="chat-input" placeholder="Ask a follow-up question..." onkeydown="if(event.key==='Enter')sendChatFollowup()">
+                <button onclick="sendChatFollowup()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Universal Chat Modal Logic ---
+        let chatAgentName = null;
+
+        const AGENT_LABELS = {
+            engineering_consultant: 'Engineering Consultant',
+            topology_recommender: 'Topology Recommender',
+            evolution_manager: 'Version Manager',
+            replacement_executor: 'Replacement Executor',
+            web_search: 'Web Search',
+            feasibility_checker: 'Feasibility Checker',
+            part_explorer: 'Part Explorer',
+            component_spec_suggester: 'Spec Suggester',
+            compliance_validator: 'Compliance Validator',
+        };
+
+        function openChatModal(agentName, title) {
+            chatAgentName = agentName;
+            document.getElementById('chat-title').textContent = title || AGENT_LABELS[agentName] || agentName;
+            document.getElementById('chat-agent-badge').textContent = agentName;
+            document.getElementById('chat-messages').innerHTML = '';
+            document.getElementById('chat-input').value = '';
+            document.getElementById('chat-overlay').classList.add('active');
+            document.getElementById('chat-input').focus();
+        }
+
+        function normalizeMarkdown(text) {
+            // Fix literal \n sequences that LLMs sometimes emit in table rows
+            return text.replace(/\\n/g, '\n');
+        }
+
+        function appendChatMsg(type, text) {
+            const container = document.getElementById('chat-messages');
+            const div = document.createElement('div');
+            div.className = 'discuss-msg ' + type;
+            if (type === 'agent' && typeof marked !== 'undefined') {
+                div.innerHTML = marked.parse(normalizeMarkdown(text));
+            } else {
+                div.textContent = text;
+            }
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function removeChatLoading() {
+            const loading = document.querySelector('#chat-messages .discuss-msg.loading');
+            if (loading) loading.remove();
+        }
+
+        function closeChatModal() {
+            document.getElementById('chat-overlay').classList.remove('active');
+            chatAgentName = null;
+        }
+
+        async function chatInitialCall(agentName, endpoint, body, title, loadingMsg) {
+            if (!sessionId) return alert('Create session first');
+            openChatModal(agentName, title);
+            appendChatMsg('loading', loadingMsg || 'Processing...');
+
+            try {
+                const resp = await fetch(`${getBaseUrl()}${endpoint}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                removeChatLoading();
+                const text = data.response || data.error || JSON.stringify(data);
+                appendChatMsg('agent', text);
+            } catch (e) {
+                removeChatLoading();
+                appendChatMsg('agent', 'Error: ' + e.message);
+            }
+        }
+
+        async function sendChatFollowup() {
+            const input = document.getElementById('chat-input');
+            const msg = input.value.trim();
+            if (!msg || !sessionId || !chatAgentName) return;
+
+            input.value = '';
+            appendChatMsg('user', msg);
+            appendChatMsg('loading', 'Thinking...');
+
+            try {
+                const resp = await fetch(`${getBaseUrl()}/api/agents/${sessionId}/chat/followup/${chatAgentName}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ message: msg })
+                });
+                const data = await resp.json();
+                removeChatLoading();
+                const text = data.response || data.error || JSON.stringify(data);
+                appendChatMsg('agent', text);
+            } catch (e) {
+                removeChatLoading();
+                appendChatMsg('agent', 'Error: ' + e.message);
+            }
+        }
+
+        // --- Specific chat openers ---
+
+        async function consultPart(partNumber) {
+            if (!sessionId) return alert('Create session first');
+            const comp = workflowSelections.selected_component;
+            if (!comp) return alert('No component focused');
+            if (!partNumber) return alert('No part number');
+            await chatInitialCall(
+                'engineering_consultant',
+                `/api/agents/${sessionId}/chat/consult-part`,
+                { part_number: partNumber, component_id: comp, message: '' },
+                `Discuss: ${partNumber} → ${comp}`,
+                'Extracting datasheet and analyzing...'
+            );
+        }
+
+        async function openConsultChat() {
+            if (!sessionId) return alert('Create session first');
+            const comp = workflowSelections.selected_component;
+            const defaultMsg = comp ? `Analyze ${comp} in the context of the current design` : 'Analyze the power subsystem';
+            const msg = prompt('Enter question:', defaultMsg);
+            if (!msg) return;
+            await chatInitialCall(
+                'engineering_consultant',
+                `/api/agents/${sessionId}/chat/consult`,
+                { message: msg },
+                'Engineering Consultant',
+                'Consulting (workflow-aware)...'
+            );
+        }
+
+        async function openRecommendChat() {
+            if (!sessionId) return alert('Create session first');
+            await chatInitialCall(
+                'topology_recommender',
+                `/api/agents/${sessionId}/chat/recommend`,
+                { message: '' },
+                'Topology Recommender',
+                'Analyzing BOM for recommendations...'
+            );
+        }
+
+        async function openExploreChat(componentId) {
+            if (!sessionId) return alert('Create session first');
+            const comp = componentId || workflowSelections.selected_component;
+            if (!comp) return alert('Set focus on a component first');
+            const msg = document.getElementById('explore-msg')?.value || '';
+            await chatInitialCall(
+                'part_explorer',
+                `/api/agents/${sessionId}/chat/explore/${comp}`,
+                { message: msg },
+                `Part Explorer: ${comp}`,
+                `Exploring alternatives for ${comp}...`
+            );
+        }
+
+        async function openComplianceChat() {
+            if (!sessionId) return alert('Create session first');
+            await chatInitialCall(
+                'compliance_validator',
+                `/api/agents/${sessionId}/chat/validate-compliance`,
+                { message: '' },
+                'Compliance Validator',
+                'Validating compliance...'
+            );
+        }
+
+        async function openSearchChat() {
+            if (!sessionId) return alert('Create session first');
+            const query = prompt('Enter search query:');
+            if (!query) return;
+            await chatInitialCall(
+                'web_search',
+                `/api/agents/${sessionId}/chat/search`,
+                { message: query },
+                'Web Search',
+                `Searching: ${query}...`
+            );
+        }
+
+        async function openSpecsChat() {
+            if (!sessionId) return alert('Create session first');
+            const topology = document.getElementById('specs-topology')?.value || '';
+            await chatInitialCall(
+                'component_spec_suggester',
+                `/api/agents/${sessionId}/chat/suggest-specs`,
+                { message: '', topology: topology || undefined },
+                topology ? `Spec Suggester: ${topology}` : 'Spec Suggester',
+                'Generating specs...'
+            );
+        }
+
+        async function openApplyChat() {
+            if (!sessionId) return alert('Create session first');
+            if (!confirm('Apply replacement? This will create a new BOM version.')) return;
+            await chatInitialCall(
+                'replacement_executor',
+                `/api/agents/${sessionId}/chat/apply-replacement`,
+                { message: '' },
+                'Replacement Executor',
+                'Applying replacement...'
+            );
+        }
+
+        async function openVersionsChat(action) {
+            if (!sessionId) return alert('Create session first');
+            let body = {};
+            if (action === 'rollback') {
+                const version = prompt('Enter version number to rollback to:');
+                if (!version) return;
+                body = { message: `Rollback to version ${version}` };
+            }
+            await chatInitialCall(
+                'evolution_manager',
+                `/api/agents/${sessionId}/chat/versions/${action || 'history'}`,
+                body,
+                'Version Manager',
+                'Managing versions...'
+            );
+        }
+    </script>
+</body>
+</html>

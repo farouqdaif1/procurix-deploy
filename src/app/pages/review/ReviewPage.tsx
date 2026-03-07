@@ -7,15 +7,18 @@ export function ReviewPage() {
   const navigate = useNavigate();
 
   const handleNavigateToStage = (stage: string) => {
+    // Upload stage is not navigable - users can only go back to Classify (fundamental) and later stages
+    if (stage === 'upload') {
+      return; // Prevent navigation to upload
+    }
+    
     const stageRoutes: Record<string, string> = {
-      upload: '/upload',
       discovery: '/discovery',
       identify: '/identify',
       fundamental: '/fundamental',
       architecture: '/architecture',
       requirements: '/requirements',
       subsystems: '/subsystems',
-      compliance: '/compliance',
     };
     
     const route = stageRoutes[stage];

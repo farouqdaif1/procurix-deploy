@@ -37,15 +37,28 @@ export function ValidationView({ components: _components, onValidationComplete }
       setError(null);
 
       try {
-        // Try GET first, fallback to POST if 404
+        // First, always try GET to check if validation results exist
         let result;
         try {
           result = await getValidationResults(sessionId);
           console.log('Got validation results from GET endpoint');
+          
+          // Check if validation has been done - if results are empty or total_parts is 0, validation hasn't been done
+          const validationNotDone = 
+            !result.success || 
+            result.total_parts === 0 || 
+            !result.validation_results || 
+            result.validation_results.length === 0;
+          
+          if (validationNotDone) {
+            console.log('Validation results indicate validation not done, generating validation...');
+            result = await validateParts(sessionId, setCurrentStage);
+            console.log('Generated validation results from POST endpoint');
+          }
         } catch (getError: any) {
-          // If 404, try POST to generate validation
+          // If 404 or other error, try POST to generate validation
           if (getError.message?.includes('404') || getError.message?.includes('Failed to get validation results: 404')) {
-            console.log('Validation results not found, generating...');
+            console.log('Validation results not found (404), generating validation...');
             result = await validateParts(sessionId, setCurrentStage);
             console.log('Generated validation results from POST endpoint');
           } else {
@@ -76,7 +89,7 @@ export function ValidationView({ components: _components, onValidationComplete }
     };
 
     fetchValidation();
-  }, [sessionId]);
+  }, [sessionId, setCurrentStage]);
 
   // Filter validation results
   const filteredResults = validationData?.validation_results.filter((result) => {

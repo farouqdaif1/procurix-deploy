@@ -7,10 +7,24 @@ import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
 
 export function UploadPage() {
   const navigate = useNavigate();
-  const { sessionId: contextSessionId, setSessionId } = useSession();
+  const { sessionId: contextSessionId, setSessionId, setCurrentStage, setUploadData } = useSession();
   const { sessionId: querySessionId, updateParams } = useQueryParams();
 
-  // Sync session ID from query params (only on mount or when query param changes)
+  // Clear session context and URL params when entering upload page for a new BOM
+  useEffect(() => {
+    // On mount, clear everything to ensure fresh start
+    // This handles the case when user clicks "Upload New BOM" from library
+    setSessionId(null);
+    setCurrentStage(null);
+    setUploadData(null);
+    
+    // If there's a query param, clear it (we're starting fresh)
+    if (querySessionId) {
+      updateParams(undefined);
+    }
+  }, []); // Only run on mount to handle new uploads
+
+  // Sync session ID from query params (only when query param changes and we have a valid session)
   useEffect(() => {
     if (querySessionId && querySessionId !== contextSessionId) {
       setSessionId(querySessionId);

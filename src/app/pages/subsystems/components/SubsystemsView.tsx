@@ -103,6 +103,13 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
 
       setIsLoadingDetails(true);
       setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: false }));
+      
+      // Clear any existing requirements for this subsystem to prevent stale data
+      // They will be refetched below
+      setSubsystemRequirements(prev => ({
+        ...prev,
+        [selectedSubsystem.id]: [],
+      }));
 
       try {
         // 1. Fetch subsystem details
@@ -110,21 +117,15 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
         setSubsystemDetails(detailsResponse);
 
         // Update components list with detailed BOM data
-        const detailedComponents: Component[] = detailsResponse.actual_parts_bom.map((part: any) => {
-          // Try to find existing component, or create new one
-          const existingComponent = classifiedComponents.find(c => c.id === part.part_number || c.partNumber === part.part_number);
-          return existingComponent || {
-            id: part.part_number,
-            reference: part.part_number,
-            partNumber: part.part_number,
-            type: 'component',
-            description: `Component ${part.part_number}`,
-            specs: {},
-            isIdentified: true,
-            isGeneric: false,
-            complianceStatus: 'compliant',
-          };
-        });
+        const detailedComponents: Component[] = detailsResponse.actual_parts_bom
+          .map((part: any) => {
+            // Only use existing component if found, otherwise skip
+            const existingComponent = classifiedComponents.find(
+              c => c.id === part.part_number || c.partNumber === part.part_number
+            );
+            return existingComponent;
+          })
+          .filter((component: Component | undefined): component is Component => component !== undefined);
 
         setSubsystemComponents(prev => ({
           ...prev,
@@ -144,23 +145,36 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
             }));
           } else if ('requirements' in requirementsResponse && Array.isArray(requirementsResponse.requirements)) {
             // New format: direct requirements array
-            const subsystemReqs = requirementsResponse.requirements;
+            // Filter to ensure requirements belong to this specific subsystem
+            const subsystemReqs = requirementsResponse.requirements.filter(
+              (req: any) => req.subsystem_id === selectedSubsystem.id
+            );
             
-            // Map API requirements to SubsystemRequirement format
-            const mappedRequirements: SubsystemRequirement[] = subsystemReqs.map((req: any) => ({
-              id: req.req_id,
-              subsystemId: req.subsystem_id,
-              title: req.description,
-              description: req.criteria,
-              priority: (req.priority || 'medium') as SubsystemRequirementPriority,
-              category: 'Functional',
-            }));
+            // Check if requirements array is empty
+            if (subsystemReqs.length === 0) {
+              setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: true }));
+              setSubsystemRequirements(prev => ({
+                ...prev,
+                [selectedSubsystem.id]: [],
+              }));
+            } else {
+              // Map API requirements to SubsystemRequirement format
+              // Always use selectedSubsystem.id to ensure correct association
+              const mappedRequirements: SubsystemRequirement[] = subsystemReqs.map((req: any) => ({
+                id: req.req_id,
+                subsystemId: selectedSubsystem.id, // Use selected subsystem ID, not API's subsystem_id
+                title: req.description,
+                description: req.criteria,
+                priority: (req.priority || 'medium') as SubsystemRequirementPriority,
+                category: 'Functional',
+              }));
 
-            setSubsystemRequirements(prev => ({
-              ...prev,
-              [selectedSubsystem.id]: mappedRequirements,
-            }));
-            setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: false }));
+              setSubsystemRequirements(prev => ({
+                ...prev,
+                [selectedSubsystem.id]: mappedRequirements,
+              }));
+              setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: false }));
+            }
           } else if ('subsystem_requirements' in requirementsResponse) {
             // Old format: subsystem_requirements array
             const subsystemReqs = requirementsResponse.subsystem_requirements.find(
@@ -168,28 +182,47 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
             );
             
             if (subsystemReqs && subsystemReqs.requirements) {
-              // Map API requirements to SubsystemRequirement format
-              const mappedRequirements: SubsystemRequirement[] = subsystemReqs.requirements.map((req: Requirement) => ({
-                id: req.id,
-                subsystemId: selectedSubsystem.id,
-                title: req.title,
-                description: req.description,
-                priority: (req.priority || 'medium') as SubsystemRequirementPriority,
-                category: req.category || 'Functional',
-              }));
+              // Filter to ensure requirements belong to this specific subsystem
+              const filteredReqs = subsystemReqs.requirements.filter(
+                (req: any) => (req.subsystem_id || subsystemReqs.subsystem_id) === selectedSubsystem.id
+              );
+              
+              // Check if requirements array is empty after filtering
+              if (filteredReqs.length === 0) {
+                setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: true }));
+                setSubsystemRequirements(prev => ({
+                  ...prev,
+                  [selectedSubsystem.id]: [],
+                }));
+              } else {
+                // Map API requirements to SubsystemRequirement format
+                // Always use selectedSubsystem.id to ensure correct association
+                const mappedRequirements: SubsystemRequirement[] = filteredReqs.map((req: any) => ({
+                  id: req.req_id || req.id,
+                  subsystemId: selectedSubsystem.id, // Use selected subsystem ID
+                  title: req.description || req.title,
+                  description: req.criteria || req.description,
+                  priority: (req.priority || 'medium') as SubsystemRequirementPriority,
+                  category: req.category || 'Functional',
+                }));
 
-              setSubsystemRequirements(prev => ({
-                ...prev,
-                [selectedSubsystem.id]: mappedRequirements,
-              }));
+                setSubsystemRequirements(prev => ({
+                  ...prev,
+                  [selectedSubsystem.id]: mappedRequirements,
+                }));
+                setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: false }));
+              }
             } else {
+              // No requirements found in old format
+              setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: true }));
               setSubsystemRequirements(prev => ({
                 ...prev,
                 [selectedSubsystem.id]: [],
               }));
             }
           } else {
-            // No requirements found
+            // No requirements found - unknown format or empty
+            setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: true }));
             setSubsystemRequirements(prev => ({
               ...prev,
               [selectedSubsystem.id]: [],
@@ -228,7 +261,9 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
   };
 
   const getSubsystemRequirements = (subsystemId: string) => {
-    return subsystemRequirements[subsystemId] || [];
+    const reqs = subsystemRequirements[subsystemId] || [];
+    // Double-check: filter to ensure all requirements belong to this subsystem
+    return reqs.filter(req => req.subsystemId === subsystemId);
   };
 
   const handleCreateRequirement = async () => {
@@ -430,12 +465,19 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
   };
 
   const handleViewDatasheet = (component: Component) => {
-    // In a real app, this would open the actual datasheet URL
-    const mockDatasheetUrl = `https://www.${component.manufacturer?.toLowerCase().replace(/\s+/g, '')}.com/datasheets/${component.partNumber}.pdf`;
-    window.open(mockDatasheetUrl, '_blank');
-    toast.success(`Opening datasheet for ${component.partNumber}`, {
-      description: 'Datasheet link opened in new tab'
-    });
+    // Check if component has a datasheet URL in specs or as a property
+    const datasheetUrl = (component as any).datasheetUrl || component.specs?.datasheetUrl;
+    
+    if (datasheetUrl) {
+      window.open(datasheetUrl, '_blank');
+      toast.success(`Opening datasheet for ${component.partNumber}`, {
+        description: 'Datasheet link opened in new tab'
+      });
+    } else {
+      toast.error('Datasheet URL not available', {
+        description: `No datasheet URL found for ${component.partNumber}`
+      });
+    }
   };
 
   const getPriorityColor = (priority: string) => {
@@ -455,59 +497,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     }
   };
 
-  // Generate mock alternative components (unused but kept for future use)
-  // @ts-expect-error - unused but kept for future use
-  const generateAlternatives = (component: Component): Component[] => {
-    return [
-      {
-        ...component,
-        id: `${component.id}-alt-1`,
-        partNumber: `${component.partNumber}-LC`, // Lower Cost variant
-        manufacturer: component.manufacturer,
-        description: `Cost-optimized alternative - ${component.description || 'Similar specs with economy package'}`,
-        complianceStatus: Math.random() > 0.3 ? 'compliant' : 'unknown',
-        specs: {
-          ...component.specs,
-          tolerance: '±5%', // Slightly worse tolerance
-          tempRange: '-40°C to +85°C',
-          package: 'SOT-23' // Smaller/cheaper package
-        }
-      },
-      {
-        ...component,
-        id: `${component.id}-alt-2`,
-        partNumber: `${component.partNumber}-HP`, // High Performance variant
-        manufacturer: component.manufacturer,
-        description: `High-performance alternative - ${component.description || 'Enhanced specs and reliability'}`,
-        complianceStatus: 'compliant',
-        specs: {
-          ...component.specs,
-          tolerance: '±1%', // Better tolerance
-          tempRange: '-55°C to +125°C',
-          package: 'DFN-8' // Better thermal package
-        }
-      },
-      {
-        ...component,
-        id: `${component.id}-alt-3`,
-        partNumber: `${component.partNumber?.replace(/\d+$/, (match) => String(Number(match) + 1))}`, // Different model number
-        manufacturer: ['Texas Instruments', 'Analog Devices', 'STMicroelectronics', 'Infineon'][Math.floor(Math.random() * 4)], // Different manufacturer
-        description: `Cross-manufacturer alternative - ${component.description || 'Compatible drop-in replacement'}`,
-        complianceStatus: Math.random() > 0.5 ? 'compliant' : 'unknown',
-        specs: {
-          ...component.specs,
-          tolerance: '±2%',
-          tempRange: '-40°C to +105°C',
-          package: 'SOIC-8'
-        }
-      }
-    ];
-  };
 
-  const totalRequirementsCount = Object.values(subsystemRequirements).reduce(
-    (sum, reqs) => sum + reqs.length,
-    0
-  );
 
   if (selectedSubsystem) {
     // Detail View
@@ -638,10 +628,16 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                       }
                       
                       if (subsystemReqs && subsystemReqs.length > 0) {
+                        // Filter to ensure requirements belong to this specific subsystem
+                        const filteredReqs = subsystemReqs.filter(
+                          (req: SubsystemRequirementItem) => req.subsystem_id === selectedSubsystem.id
+                        );
+                        
                         // Map API requirements to SubsystemRequirement format
-                        const mappedRequirements: SubsystemRequirement[] = subsystemReqs.map((req) => ({
+                        // Always use selectedSubsystem.id to ensure correct association
+                        const mappedRequirements: SubsystemRequirement[] = filteredReqs.map((req) => ({
                           id: req.req_id,
-                          subsystemId: req.subsystem_id,
+                          subsystemId: selectedSubsystem.id, // Use selected subsystem ID, not API's subsystem_id
                           title: req.description,
                           description: req.criteria,
                           priority: (req.priority || 'medium') as SubsystemRequirementPriority,
@@ -1660,7 +1656,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 </button>
               </div>
               <Button onClick={onComplete} size="lg" className="gap-2">
-                Continue to Compliance
+                Continue to Review
                 <ChevronRight className="h-5 w-5" />
               </Button>
             </div>
@@ -1691,15 +1687,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-green-100 p-2">
-              <FileText className="h-5 w-5 text-green-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-gray-900">{totalRequirementsCount}</div>
-              <div className="text-xs text-gray-600">Functional Requirements</div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -1721,7 +1708,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {subsystems.map((subsystem) => {
                 const subsystemComps = getSubsystemComponents(subsystem.id);
-                const subsystemReqs = getSubsystemRequirements(subsystem.id);
 
                 return (
                   <button
@@ -1751,10 +1737,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-gray-600">Components</span>
                           <span className="font-semibold text-gray-900">{subsystemComps.length}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-600">Requirements</span>
-                          <span className="font-semibold text-gray-900">{subsystemReqs.length}</span>
                         </div>
                         {subsystem.complianceScore !== undefined && (
                           <div className="flex items-center justify-between text-sm">

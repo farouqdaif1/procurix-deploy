@@ -25,11 +25,11 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface ReviewStageProps {
   session: BOMSession;
-  onNavigateToStage: (stage: 'upload' | 'discovery' | 'identify' | 'fundamental' | 'architecture' | 'requirements' | 'subsystems' | 'compliance') => void;
+  onNavigateToStage: (stage: 'upload' | 'discovery' | 'identify' | 'fundamental' | 'architecture' | 'requirements' | 'subsystems') => void;
   onSubmit?: () => void;
 }
 
-type ExpandedSection = 'upload' | 'discovery' | 'identify' | 'fundamental' | 'architecture' | 'requirements' | 'subsystems' | 'compliance' | null;
+type ExpandedSection = 'upload' | 'discovery' | 'identify' | 'fundamental' | 'architecture' | 'requirements' | 'subsystems' | null;
 
 export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStageProps) {
   const [expandedSection, setExpandedSection] = useState<ExpandedSection>(null);
@@ -197,18 +197,21 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
                     <Badge className="bg-white text-gray-700 border border-gray-300">
                       {section.summary}
                     </Badge>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onNavigateToStage(section.id);
-                      }}
-                      className="gap-2"
-                    >
-                      <ArrowRight className="h-4 w-4" />
-                      Go Back
-                    </Button>
+                    {/* Upload stage cannot be navigated back to - Classify is the earliest stage */}
+                    {section.id !== 'upload' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNavigateToStage(section.id);
+                        }}
+                        className="gap-2"
+                      >
+                        <ArrowRight className="h-4 w-4" />
+                        Go Back
+                      </Button>
+                    )}
                     {isExpanded ? (
                       <ChevronDown className="h-5 w-5 text-gray-600" />
                     ) : (
@@ -749,11 +752,11 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
             <Button
               variant="outline"
               size="lg"
-              onClick={() => onNavigateToStage('compliance')}
+              onClick={() => onNavigateToStage('subsystems')}
               className="gap-2"
             >
               <ArrowRight className="h-4 w-4 rotate-180" />
-              Go Back to Compliance
+              Go Back to Subsystems
             </Button>
             
             <Button
