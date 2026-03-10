@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import type { Subsystem, Component, Requirement } from '@/app/types';
-import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, type SubsystemRequirementItem } from '@/app/services/api';
+import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, updateSubsystem, type SubsystemRequirementItem } from '@/app/services/api';
 import { 
   Grid3x3, 
   ChevronRight, 
-  CheckCircle2, 
   Package, 
   Cpu,
   ArrowLeft,
@@ -20,8 +19,7 @@ import {
   X,
   Edit2,
   Check,
-  Filter,
-  ExternalLink
+  Filter
 } from 'lucide-react';
 import { Button } from '@/app/shared/components/ui/button';
 import { Badge } from '@/app/shared/components/ui/badge';
@@ -52,11 +50,18 @@ interface SubsystemRequirement {
   category: string;
 }
 
+interface ActualPart {
+  part_number: string;
+  quantity: number;
+  specs: Record<string, any>;
+}
+
 export function SubsystemsView({ subsystems, components, requirements, onComplete, onAddRequirements, sessionId }: SubsystemsViewProps) {
   const [selectedSubsystem, setSelectedSubsystem] = useState<Subsystem | null>(null);
   const [subsystemDetails, setSubsystemDetails] = useState<any>(null);
   const [subsystemRequirements, setSubsystemRequirements] = useState<Record<string, SubsystemRequirement[]>>({});
   const [subsystemComponents, setSubsystemComponents] = useState<Record<string, Component[]>>({});
+  const [subsystemActualParts, setSubsystemActualParts] = useState<Record<string, ActualPart[]>>({});
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [requirementsNotFound, setRequirementsNotFound] = useState<Record<string, boolean>>({});
   const [isAddingRequirement, setIsAddingRequirement] = useState(false);
@@ -69,7 +74,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
   });
   const [classifiedComponents, setClassifiedComponents] = useState<Component[]>(components);
   const [isRequirementsExpanded, setIsRequirementsExpanded] = useState(false);
-  const [selectedComponent, setSelectedComponent] = useState<Component | null>(null);
+  const [selectedPart, setSelectedPart] = useState<ActualPart | null>(null);
   const [requirementSearchQuery, setRequirementSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const [editingRequirementId, setEditingRequirementId] = useState<string | null>(null);
@@ -84,8 +89,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     priority: 'medium',
     category: '',
   });
-  const [isEditingSpecs, setIsEditingSpecs] = useState(false);
-  const [editedSpecs, setEditedSpecs] = useState<Record<string, any>>({});
   const [isGeneratingRequirements, setIsGeneratingRequirements] = useState(false);
   const [showCreateRequirementModal, setShowCreateRequirementModal] = useState(false);
   const [isCreatingRequirement, setIsCreatingRequirement] = useState(false);
@@ -94,6 +97,13 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     criteria: '',
     priority: 'medium',
     mapped_components: [] as string[],
+  });
+  const [showAddPartModal, setShowAddPartModal] = useState(false);
+  const [isAddingPart, setIsAddingPart] = useState(false);
+  const [isRemovingPart, setIsRemovingPart] = useState<string | null>(null);
+  const [addPartForm, setAddPartForm] = useState({
+    part_number: '',
+    quantity: 1,
   });
 
   // Fetch subsystem details and requirements when a subsystem is selected
@@ -116,7 +126,21 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
         const detailsResponse = await getSubsystemDetails(sessionId, selectedSubsystem.id);
         setSubsystemDetails(detailsResponse);
 
-        // Update components list with detailed BOM data
+        // Store actual parts with specs
+        if (detailsResponse.actual_parts_bom && Array.isArray(detailsResponse.actual_parts_bom)) {
+          const actualParts: ActualPart[] = detailsResponse.actual_parts_bom.map((part: any) => ({
+            part_number: part.part_number,
+            quantity: part.quantity || 1,
+            specs: part.specs || {},
+          }));
+          
+          setSubsystemActualParts(prev => ({
+            ...prev,
+            [selectedSubsystem.id]: actualParts,
+          }));
+        }
+
+        // Update components list with detailed BOM data (for backward compatibility)
         const detailedComponents: Component[] = detailsResponse.actual_parts_bom
           .map((part: any) => {
             // Only use existing component if found, otherwise skip
@@ -258,6 +282,135 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     const subsystem = subsystems.find(s => s.id === subsystemId);
     if (!subsystem) return [];
     return classifiedComponents.filter(c => subsystem.componentIds.includes(c.id));
+  };
+
+  const getSubsystemActualParts = (subsystemId: string): ActualPart[] => {
+    return subsystemActualParts[subsystemId] || [];
+  };
+
+  const handleAddPart = async () => {
+    if (!selectedSubsystem || !sessionId || !subsystemDetails) return;
+    
+    if (!addPartForm.part_number.trim()) {
+      toast.error('Please enter a part number');
+      return;
+    }
+
+    setIsAddingPart(true);
+    try {
+      // Get current parts list
+      const currentParts = getSubsystemActualParts(selectedSubsystem.id);
+      
+      // Check if part already exists
+      const existingPartIndex = currentParts.findIndex(
+        p => p.part_number === addPartForm.part_number.trim()
+      );
+
+      let updatedParts: ActualPart[];
+      if (existingPartIndex >= 0) {
+        // Update quantity if part already exists
+        updatedParts = currentParts.map((part, index) =>
+          index === existingPartIndex
+            ? { ...part, quantity: part.quantity + (addPartForm.quantity || 1) }
+            : part
+        );
+      } else {
+        // Add new part
+        updatedParts = [
+          ...currentParts,
+          {
+            part_number: addPartForm.part_number.trim(),
+            quantity: addPartForm.quantity || 1,
+            specs: {},
+          },
+        ];
+      }
+
+      // Update subsystem using PUT
+      const response = await updateSubsystem(sessionId, selectedSubsystem.id, {
+        name: subsystemDetails.name,
+        description: subsystemDetails.description,
+        component_bom: subsystemDetails.component_bom || [],
+        actual_parts_bom: updatedParts,
+        requirements: subsystemDetails.requirements || {},
+      });
+
+      if (response.success || response.subsystem) {
+        // Update local state with new parts list
+        setSubsystemActualParts(prev => ({
+          ...prev,
+          [selectedSubsystem.id]: updatedParts,
+        }));
+
+        // Update subsystem details if returned
+        if (response.subsystem) {
+          setSubsystemDetails(response.subsystem);
+        }
+
+        toast.success('Part added successfully!');
+        setShowAddPartModal(false);
+        setAddPartForm({ part_number: '', quantity: 1 });
+      } else {
+        toast.error(response.message || 'Failed to add part');
+      }
+    } catch (error: any) {
+      console.error('Failed to add part:', error);
+      toast.error(error.message || 'Failed to add part to subsystem');
+    } finally {
+      setIsAddingPart(false);
+    }
+  };
+
+  const handleRemovePart = async (partNumber: string) => {
+    if (!selectedSubsystem || !sessionId || !subsystemDetails) return;
+
+    // Confirm removal
+    if (!confirm(`Are you sure you want to remove part "${partNumber}" from this subsystem?`)) {
+      return;
+    }
+
+    setIsRemovingPart(partNumber);
+    try {
+      // Get current parts list and remove the part
+      const currentParts = getSubsystemActualParts(selectedSubsystem.id);
+      const updatedParts = currentParts.filter(p => p.part_number !== partNumber);
+
+      // Update subsystem using PUT
+      const response = await updateSubsystem(sessionId, selectedSubsystem.id, {
+        name: subsystemDetails.name,
+        description: subsystemDetails.description,
+        component_bom: subsystemDetails.component_bom || [],
+        actual_parts_bom: updatedParts,
+        requirements: subsystemDetails.requirements || {},
+      });
+
+      if (response.success || response.subsystem) {
+        // Update local state with new parts list
+        setSubsystemActualParts(prev => ({
+          ...prev,
+          [selectedSubsystem.id]: updatedParts,
+        }));
+
+        // Update subsystem details if returned
+        if (response.subsystem) {
+          setSubsystemDetails(response.subsystem);
+        }
+
+        // Clear selected part if it was removed
+        if (selectedPart?.part_number === partNumber) {
+          setSelectedPart(null);
+        }
+
+        toast.success('Part removed successfully!');
+      } else {
+        toast.error(response.message || 'Failed to remove part');
+      }
+    } catch (error: any) {
+      console.error('Failed to remove part:', error);
+      toast.error(error.message || 'Failed to remove part from subsystem');
+    } finally {
+      setIsRemovingPart(null);
+    }
   };
 
   const getSubsystemRequirements = (subsystemId: string) => {
@@ -421,64 +574,6 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     });
   };
 
-  const handleEditSpecs = (component: Component) => {
-    setIsEditingSpecs(true);
-    setEditedSpecs({
-      ...component.specs,
-      manufacturer: component.manufacturer,
-      partNumber: component.partNumber,
-      description: component.description,
-    });
-  };
-
-  const handleSaveSpecs = () => {
-    if (!selectedComponent) return;
-    
-    setClassifiedComponents(prev =>
-      prev.map(c =>
-        c.id === selectedComponent.id
-          ? {
-              ...c,
-              specs: {
-                tolerance: editedSpecs.tolerance,
-                tempRange: editedSpecs.tempRange,
-                package: editedSpecs.package,
-                voltage: editedSpecs.voltage,
-                current: editedSpecs.current,
-                power: editedSpecs.power,
-              },
-              manufacturer: editedSpecs.manufacturer,
-              partNumber: editedSpecs.partNumber,
-              description: editedSpecs.description,
-            }
-          : c
-      )
-    );
-    
-    setIsEditingSpecs(false);
-    toast.success('Component specs updated!');
-  };
-
-  const handleCancelEditSpecs = () => {
-    setIsEditingSpecs(false);
-    setEditedSpecs({});
-  };
-
-  const handleViewDatasheet = (component: Component) => {
-    // Check if component has a datasheet URL in specs or as a property
-    const datasheetUrl = (component as any).datasheetUrl || component.specs?.datasheetUrl;
-    
-    if (datasheetUrl) {
-      window.open(datasheetUrl, '_blank');
-      toast.success(`Opening datasheet for ${component.partNumber}`, {
-        description: 'Datasheet link opened in new tab'
-      });
-    } else {
-      toast.error('Datasheet URL not available', {
-        description: `No datasheet URL found for ${component.partNumber}`
-      });
-    }
-  };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -1076,50 +1171,100 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
               )}
             </div>
 
-            {/* Components Section */}
+            {/* Parts Section */}
             <div className="rounded-xl border-2 border-gray-200 bg-white p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <Package className="h-5 w-5 text-blue-600" />
-                Components ({subsystemComps.length})
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <Package className="h-5 w-5 text-blue-600" />
+                  Parts ({getSubsystemActualParts(selectedSubsystem.id).length})
+                </h2>
+                <Button
+                  onClick={() => setShowAddPartModal(true)}
+                  size="sm"
+                  className="gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Part
+                </Button>
+              </div>
               {isLoadingDetails ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Loading components...</p>
+                    <p className="text-gray-600">Loading parts...</p>
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {subsystemComps.map((comp) => (
-                    <button
-                      key={comp.id}
-                      onClick={() => setSelectedComponent(comp)}
-                      className={`rounded-lg border p-3 transition-all text-left ${
-                        selectedComponent?.id === comp.id
+                  {getSubsystemActualParts(selectedSubsystem.id).map((part) => (
+                    <div
+                      key={part.part_number}
+                      className={`rounded-lg border p-3 transition-all ${
+                        selectedPart?.part_number === part.part_number
                           ? 'border-blue-500 bg-blue-50 shadow-md'
-                          : 'border-gray-200 bg-gray-50 hover:border-blue-300 hover:bg-blue-50'
+                          : 'border-gray-200 bg-gray-50'
                       }`}
                     >
                       <div className="flex items-start justify-between mb-2">
-                        <div className="font-semibold text-sm text-gray-900">{comp.reference}</div>
-                        {comp.complianceStatus === 'compliant' && (
-                          <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
-                        )}
-                        {comp.complianceStatus === 'failed' && (
-                          <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
-                        )}
+                        <button
+                          onClick={() => setSelectedPart(part)}
+                          className="flex-1 text-left"
+                        >
+                          <div className="font-semibold text-sm text-gray-900">{part.part_number}</div>
+                        </button>
+                        <div className="flex items-center gap-2">
+                          {part.quantity > 1 && (
+                            <Badge className="bg-blue-100 text-blue-700 text-xs">x{part.quantity}</Badge>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemovePart(part.part_number);
+                            }}
+                            disabled={isRemovingPart === part.part_number}
+                          >
+                            {isRemovingPart === part.part_number ? (
+                              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600" />
+                            ) : (
+                              <X className="h-3 w-3" />
+                            )}
+                          </Button>
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-600 mb-1">{comp.partNumber || 'Generic'}</div>
-                      <div className="text-xs text-gray-500">{comp.manufacturer || 'N/A'}</div>
-                    </button>
+                      <button
+                        onClick={() => setSelectedPart(part)}
+                        className="text-xs text-gray-500 w-full text-left"
+                      >
+                        {Object.keys(part.specs).length > 0 
+                          ? `${Object.keys(part.specs).length} specs available`
+                          : 'No specs available'}
+                      </button>
+                    </div>
                   ))}
+                  {getSubsystemActualParts(selectedSubsystem.id).length === 0 && (
+                    <div className="col-span-full text-center py-8">
+                      <Package className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600 mb-2">No parts in this subsystem</p>
+                      <Button
+                        onClick={() => setShowAddPartModal(true)}
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add First Part
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Component Specs Section */}
-            {selectedComponent && (
+            {/* Part Specs Section */}
+            {selectedPart && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1131,327 +1276,171 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                       <Package className="h-5 w-5 text-blue-600" />
                     </div>
                     <div>
-                      <h2 className="text-xl font-bold text-gray-900">Component Specifications</h2>
-                      <p className="text-sm text-gray-600">{selectedComponent.reference}</p>
+                      <h2 className="text-xl font-bold text-gray-900">Part Specifications</h2>
+                      <p className="text-sm text-gray-600">{selectedPart.part_number}</p>
                     </div>
                   </div>
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={() => {
-                      setSelectedComponent(null);
-                      setIsEditingSpecs(false);
-                      setEditedSpecs({});
+                      setSelectedPart(null);
                     }}
                   >
                     <X className="h-5 w-5" />
                   </Button>
                 </div>
 
-                {/* Current Component Header */}
+                {/* Current Part Header */}
                 <div className="rounded-lg border-2 border-blue-300 bg-white p-4 mb-6">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-gray-900 text-lg">{selectedComponent.partNumber}</h3>
-                      {selectedComponent.complianceStatus === 'compliant' && (
-                        <Badge className="bg-green-100 text-green-700">Compliant</Badge>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      {!isEditingSpecs && (
-                        <>
-                          <Button
-                            onClick={() => handleEditSpecs(selectedComponent)}
-                            variant="outline"
-                            size="sm"
-                            className="gap-2"
-                          >
-                            <Edit2 className="h-4 w-4" />
-                            Edit Specs
-                          </Button>
-                          <Button
-                            onClick={() => handleViewDatasheet(selectedComponent)}
-                            variant="default"
-                            size="sm"
-                            className="gap-2"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                            View Datasheet
-                          </Button>
-                        </>
+                      <h3 className="font-bold text-gray-900 text-lg">{selectedPart.part_number}</h3>
+                      {selectedPart.quantity > 1 && (
+                        <Badge className="bg-blue-100 text-blue-700">Quantity: {selectedPart.quantity}</Badge>
                       )}
                     </div>
                   </div>
-                  <p className="text-sm text-gray-600">
-                    {selectedComponent.manufacturer || 'N/A'} • {selectedComponent.type || 'N/A'}
-                  </p>
                 </div>
 
-                {isEditingSpecs ? (
-                  // Edit Mode
-                  <div className="space-y-4">
-                    <div className="rounded-lg border-2 border-yellow-300 bg-yellow-50 p-4 mb-4">
-                      <div className="flex items-center gap-2 text-yellow-800">
-                        <AlertCircle className="h-4 w-4" />
-                        <span className="text-sm font-semibold">Editing Component Specifications</span>
+                {/* View Mode - Display Actual Part Specs */}
+                <div className="space-y-4">
+                  {/* Quantity Info */}
+                  {selectedPart.quantity > 1 && (
+                    <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
+                      <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">
+                        Quantity
+                      </div>
+                      <div className="text-lg font-bold text-blue-900">
+                        {selectedPart.quantity} units
                       </div>
                     </div>
+                  )}
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Part Number
-                        </label>
-                        <Input
-                          value={editedSpecs.partNumber || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, partNumber: e.target.value }))}
-                          placeholder="e.g., TPS54331DR"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Manufacturer
-                        </label>
-                        <Input
-                          value={editedSpecs.manufacturer || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, manufacturer: e.target.value }))}
-                          placeholder="e.g., Texas Instruments"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Value
-                        </label>
-                        <Input
-                          value={editedSpecs.value || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, value: e.target.value }))}
-                          placeholder="e.g., 10uF, 100kΩ"
-                          className="font-mono"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Price ($)
-                        </label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={editedSpecs.price || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                          placeholder="e.g., 2.50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Tolerance
-                        </label>
-                        <Input
-                          value={editedSpecs.tolerance || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, tolerance: e.target.value }))}
-                          placeholder="e.g., ±5%, ±1%"
-                          className="font-mono"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Temperature Range
-                        </label>
-                        <Input
-                          value={editedSpecs.tempRange || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, tempRange: e.target.value }))}
-                          placeholder="e.g., -40°C to +85°C"
-                          className="font-mono"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Package
-                        </label>
-                        <Input
-                          value={editedSpecs.package || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, package: e.target.value }))}
-                          placeholder="e.g., SOIC-8, 0603"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Voltage
-                        </label>
-                        <Input
-                          value={editedSpecs.voltage || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, voltage: e.target.value }))}
-                          placeholder="e.g., 3.3V, 12V"
-                          className="font-mono"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Current
-                        </label>
-                        <Input
-                          value={editedSpecs.current || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, current: e.target.value }))}
-                          placeholder="e.g., 500mA, 2A"
-                          className="font-mono"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">
-                          Power
-                        </label>
-                        <Input
-                          value={editedSpecs.power || ''}
-                          onChange={(e) => setEditedSpecs(prev => ({ ...prev, power: e.target.value }))}
-                          placeholder="e.g., 250mW, 1/4W"
-                          className="font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1 block">
-                        Description
-                      </label>
-                      <Textarea
-                        value={editedSpecs.description || ''}
-                        onChange={(e) => setEditedSpecs(prev => ({ ...prev, description: e.target.value }))}
-                        placeholder="Component description..."
-                        rows={3}
-                      />
-                    </div>
-
-                    <div className="flex gap-2 pt-4 border-t">
-                      <Button onClick={handleSaveSpecs} className="gap-2">
-                        <Check className="h-4 w-4" />
-                        Save Specifications
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        onClick={handleCancelEditSpecs}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  // View Mode
-                  <div className="space-y-4">
-                    {/* Description */}
-                    {selectedComponent.description && (
-                      <div className="rounded-lg bg-white border border-gray-200 p-4">
-                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                          Description
-                        </div>
-                        <p className="text-sm text-gray-700">{selectedComponent.description}</p>
-                      </div>
-                    )}
-
-                    {/* Specifications Grid */}
+                  {/* Specifications Grid - Dynamic from API */}
+                  {Object.keys(selectedPart.specs).length > 0 ? (
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-
-                      {selectedComponent.specs?.tolerance && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
+                      {Object.entries(selectedPart.specs).map(([key, value]) => (
+                        <div key={key} className="rounded-lg bg-white border border-gray-200 p-4">
                           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Tolerance
+                            {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                           </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.tolerance}
+                          <div className="text-sm font-bold text-gray-900 break-words">
+                            {String(value)}
                           </div>
                         </div>
-                      )}
-
-                      {selectedComponent.specs?.tempRange && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Temperature Range
-                          </div>
-                          <div className="text-sm font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.tempRange}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedComponent.specs?.package && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Package
-                          </div>
-                          <div className="text-lg font-bold text-gray-900">
-                            {selectedComponent.specs.package}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedComponent.specs?.voltage && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Voltage
-                          </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.voltage}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedComponent.specs?.current && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Current
-                          </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.current}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedComponent.specs?.power && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Power
-                          </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.power}
-                          </div>
-                        </div>
-                      )}
+                      ))}
                     </div>
-
-                    {/* Additional Info */}
-                    <div className="rounded-lg bg-gradient-to-r from-blue-100 to-cyan-100 border border-blue-200 p-4">
-                      <div className="flex items-start gap-3">
-                        <FileText className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-blue-900 mb-1">Need more information?</h4>
-                          <p className="text-sm text-blue-800 mb-3">
-                            View the complete datasheet for detailed specifications, performance graphs, and application notes.
-                          </p>
-                          <Button
-                            onClick={() => handleViewDatasheet(selectedComponent)}
-                            variant="default"
-                            size="sm"
-                            className="gap-2 bg-blue-600 hover:bg-blue-700"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                            Open Datasheet
-                          </Button>
-                        </div>
-                      </div>
+                  ) : (
+                    <div className="rounded-lg bg-gray-50 border border-gray-200 p-8 text-center">
+                      <AlertCircle className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-sm text-gray-600">No specifications available for this part</p>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </motion.div>
             )}
           </div>
         </div>
+
+        {/* Add Part Modal */}
+        {showAddPartModal && selectedSubsystem && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-8"
+            onClick={() => setShowAddPartModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-auto"
+            >
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg bg-blue-100 p-2">
+                      <Plus className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">Add Part to Subsystem</h2>
+                      <p className="text-sm text-gray-600">{selectedSubsystem.name}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowAddPartModal(false);
+                      setAddPartForm({ part_number: '', quantity: 1 });
+                    }}
+                    className="rounded-lg p-2 hover:bg-gray-100 transition-colors"
+                  >
+                    <X className="h-5 w-5 text-gray-500" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">
+                      Part Number *
+                    </label>
+                    <Input
+                      placeholder="e.g., LD39200DPUR"
+                      value={addPartForm.part_number}
+                      onChange={(e) => setAddPartForm(prev => ({ ...prev, part_number: e.target.value }))}
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Enter the part number to add to this subsystem</p>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">
+                      Quantity
+                    </label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={addPartForm.quantity}
+                      onChange={(e) => setAddPartForm(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                      placeholder="1"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Number of units of this part</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-4 border-t mt-6">
+                  <Button
+                    onClick={handleAddPart}
+                    disabled={isAddingPart || !addPartForm.part_number.trim()}
+                    className="gap-2"
+                  >
+                    {isAddingPart ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Adding...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4" />
+                        Add Part
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowAddPartModal(false);
+                      setAddPartForm({ part_number: '', quantity: 1 });
+                    }}
+                    disabled={isAddingPart}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
 
         {/* Create Requirement Modal */}
         {showCreateRequirementModal && (
@@ -1534,31 +1523,34 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                     Mapped Components
                   </label>
                   <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3">
-                    {getSubsystemComponents(selectedSubsystem.id).map((comp) => (
-                      <label key={comp.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                    {getSubsystemActualParts(selectedSubsystem.id).map((part) => (
+                      <label key={part.part_number} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
                         <input
                           type="checkbox"
-                          checked={createRequirementForm.mapped_components.includes(comp.id)}
+                          checked={createRequirementForm.mapped_components.includes(part.part_number)}
                           onChange={(e) => {
                             if (e.target.checked) {
                               setCreateRequirementForm(prev => ({
                                 ...prev,
-                                mapped_components: [...prev.mapped_components, comp.id]
+                                mapped_components: [...prev.mapped_components, part.part_number]
                               }));
                             } else {
                               setCreateRequirementForm(prev => ({
                                 ...prev,
-                                mapped_components: prev.mapped_components.filter(id => id !== comp.id)
+                                mapped_components: prev.mapped_components.filter(id => id !== part.part_number)
                               }));
                             }
                           }}
                           className="rounded border-gray-300"
                         />
-                        <span className="text-sm text-gray-700">{comp.partNumber || comp.reference}</span>
+                        <span className="text-sm text-gray-700">
+                          {part.part_number}
+                          {part.quantity > 1 && <span className="text-gray-500 ml-1">(x{part.quantity})</span>}
+                        </span>
                       </label>
                     ))}
-                    {getSubsystemComponents(selectedSubsystem.id).length === 0 && (
-                      <p className="text-sm text-gray-500">No components available</p>
+                    {getSubsystemActualParts(selectedSubsystem.id).length === 0 && (
+                      <p className="text-sm text-gray-500">No parts available</p>
                     )}
                   </div>
                 </div>

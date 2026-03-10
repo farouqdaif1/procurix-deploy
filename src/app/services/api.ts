@@ -754,6 +754,7 @@ export interface SubsystemDetailsResponse {
     actual_parts_bom: Array<{
         part_number: string;
         quantity: number;
+        specs: Record<string, any>;
     }>;
     requirements: Record<string, any>;
 }
@@ -769,6 +770,48 @@ export async function getSubsystemDetails(sessionId: string, subsystemId: string
     if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to get subsystem details: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface UpdateSubsystemRequest {
+    name?: string;
+    description?: string;
+    component_bom?: Array<{
+        component_id: string;
+        quantity: number;
+    }>;
+    actual_parts_bom?: Array<{
+        part_number: string;
+        quantity: number;
+        specs?: Record<string, any>;
+    }>;
+    requirements?: Record<string, any>;
+}
+
+export interface UpdateSubsystemResponse {
+    success: boolean;
+    message?: string;
+    subsystem?: SubsystemDetailsResponse;
+}
+
+export async function updateSubsystem(
+    sessionId: string,
+    subsystemId: string,
+    subsystemData: UpdateSubsystemRequest
+): Promise<UpdateSubsystemResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(subsystemData),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to update subsystem: ${response.status} ${errorText}`);
     }
 
     return response.json();
