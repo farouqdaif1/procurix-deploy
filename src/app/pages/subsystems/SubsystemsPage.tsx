@@ -170,9 +170,9 @@ export function SubsystemsPage() {
     const activeSessionId = contextSessionId || querySessionId;
     toast.success('Subsystems identified!');
     if (activeSessionId) {
-      navigate(`/review?session=${activeSessionId}`);
+      navigate(`/finalize?session=${activeSessionId}`);
     } else {
-      navigate('/review');
+      navigate('/finalize');
     }
   };
 

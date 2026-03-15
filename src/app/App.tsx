@@ -11,7 +11,7 @@ import { AnalysisPage } from './pages/analysis/AnalysisPage';
 import { ArchitecturePage } from './pages/architecture/ArchitecturePage';
 import { RequirementsPage } from './pages/requirements/RequirementsPage';
 import { SubsystemsPage } from './pages/subsystems/SubsystemsPage';
-import { ReviewPage } from './pages/review/ReviewPage';
+import { FinalizePage } from './pages/finalize/FinalizePage';
 import { CompletedPage } from './pages/completed/CompletedPage';
 import { OptimizationPage } from './pages/optimization/OptimizationPage';
 
@@ -30,7 +30,7 @@ export default function App() {
           <Route path="/architecture" element={<Layout showStageIndicator={true}><ArchitecturePage /></Layout>} />
           <Route path="/requirements" element={<Layout showStageIndicator={true}><RequirementsPage /></Layout>} />
           <Route path="/subsystems" element={<Layout showStageIndicator={true}><SubsystemsPage /></Layout>} />
-          <Route path="/review" element={<Layout><ReviewPage /></Layout>} />
+          <Route path="/finalize" element={<Layout><FinalizePage /></Layout>} />
           <Route path="/completed" element={<CompletedPage />} />
           <Route path="/optimization" element={<OptimizationPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -20,8 +20,8 @@ export function getRouteForStage(stageNumber: number): string {
     6: '/architecture',     // Part Connections
     7: '/subsystems',       // Subsystems
     8: '/subsystems?tab=requirements', // Subsystem Requirements
-    9: '/completed',        // Status & Finalization
+    9: '/finalize',         // Status & Finalization
   };
-  
+
   return stageRouteMap[stageNumber] || '/upload';
 }

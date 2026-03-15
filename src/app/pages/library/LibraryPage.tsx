@@ -10,7 +10,7 @@ import { getRouteForStage } from '@/app/shared/utils/navigation';
 // Map API stage number to SessionStage type
 // Stages: 1=Upload, 2=Classification, 3=Analysis, 4=Validation, 5=Requirements, 6=Connections, 7=Subsystems, 8=Subsystem Reqs, 9=Finalization
 const mapStageNumberToStage = (stageNumber: number): SessionStage => {
-  if (stageNumber >= 9) return 'review'; // Stage 9: Status & Finalization
+  if (stageNumber >= 9) return 'finalize'; // Stage 9: Status & Finalization
   if (stageNumber >= 8) return 'subsystems'; // Stage 8: Subsystem Requirements
   if (stageNumber >= 7) return 'subsystems'; // Stage 7: Subsystems
   if (stageNumber >= 6) return 'architecture'; // Stage 6: Part Connections
@@ -80,11 +80,21 @@ export function LibraryPage() {
     // Set session ID in context
     setSessionId(session.id);
     
-    // Get the current stage number from the map
-    const currentStage = sessionStageMap.get(session.id) || 1;
+    // Get the current stage number - prefer currentStageNumber from session, fallback to map lookup
+    const sessionWithStage = session as BOMSession & { currentStageNumber?: number };
+    const currentStage = sessionWithStage.currentStageNumber || sessionStageMap.get(session.id) || 1;
+    
+    // Check if this is a completed BOM (stage 9 or finalize stage)
+    const isCompleted = currentStage >= 9 || session.stage === 'finalize';
     
     // Set current_stage in context so StageIndicator knows the max reached stage
     setCurrentStage(currentStage);
+    
+    // For completed BOMs, always navigate to finalize
+    if (isCompleted) {
+      navigate(`/finalize?session=${session.id}`);
+      return;
+    }
     
     // Get the route for this stage
     const route = getRouteForStage(currentStage);

@@ -958,3 +958,110 @@ export async function getRequirementsGET(sessionId: string): Promise<Requirement
 
     return response.json();
 }
+
+// Finalize API endpoints
+
+export interface ComponentProperty {
+    units: string;
+    value: string;
+    si_value: string;
+    display_value: string;
+}
+
+export interface FinalizedComponent {
+    session_id: string;
+    name: string;
+    category: string;
+    properties: Record<string, ComponentProperty>;
+    depends_on: string[];
+    rationale: string;
+}
+
+export interface ComponentsResponse {
+    success: boolean;
+    components_count: number;
+    components: FinalizedComponent[];
+}
+
+export async function getComponents(sessionId: string): Promise<ComponentsResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/components`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get components: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface FinalizeResponse {
+    success: boolean;
+    components_created: number;
+    version: number;
+    requirements_loaded: {
+        requirements_count: number;
+        subsystems_count: number;
+        subsystem_requirements_count: number;
+        bom_id: string;
+    };
+    system_type: string;
+}
+
+export async function finalizeSession(sessionId: string): Promise<FinalizeResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/finalize`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to finalize session: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
+export interface RequirementsDataRequirement {
+    req_id: string;
+    description: string;
+    category: string;
+    bom_reference: string[];
+}
+
+export interface RequirementsDataSubsystem {
+    subsystem_id: string;
+    name: string;
+    description: string;
+    associated_requirements: string[];
+    bom_reference: string[];
+}
+
+export interface RequirementsDataResponse {
+    success: boolean;
+    requirements: RequirementsDataRequirement[];
+    subsystems: RequirementsDataSubsystem[];
+    subsystem_requirements: any[];
+}
+
+export async function getRequirementsData(sessionId: string): Promise<RequirementsDataResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements-data`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get requirements data: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}

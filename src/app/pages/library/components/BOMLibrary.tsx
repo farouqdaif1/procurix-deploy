@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { BOMSession } from '@/app/types';
-import { FileText, CheckCircle2, AlertTriangle, Clock, Search, Plus, ChevronRight, Cpu, Package } from 'lucide-react';
+import { FileText, CheckCircle2, AlertTriangle, Clock, Search, Plus, ChevronRight, Cpu, Package, ChevronLeft } from 'lucide-react';
 import { Button } from '@/app/shared/components/ui/button';
 import { Input } from '@/app/shared/components/ui/input';
 import { Badge } from '@/app/shared/components/ui/badge';
@@ -11,9 +11,12 @@ interface BOMLibraryProps {
   onNewBOM: () => void;
 }
 
+const ITEMS_PER_PAGE = 10;
+
 export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'complete' | 'in-progress'>('all');
+  const [currentPage, setCurrentPage] = useState(1);
 
   const getStageLabel = (stage: string, stageNumber?: number) => {
     // Special case: stage 8 is Subsystem Requirements (same page as stage 7 but different label)
@@ -29,7 +32,7 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
       requirements: 'Requirements',
       architecture: 'Part Connections',
       subsystems: 'Subsystems',
-      review: 'Status & Finalization',
+      finalize: 'Status & Finalization',
     };
     return labels[stage] || stage;
   };
@@ -40,28 +43,49 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
       return (stageNumber / 9) * 100; // 9 total stages
     }
     // Fallback: calculate based on stage name
-    const stages = ['upload', 'fundamental', 'analysis', 'validate', 'requirements', 'architecture', 'subsystems', 'review'];
+    const stages = ['upload', 'fundamental', 'analysis', 'validate', 'requirements', 'architecture', 'subsystems', 'finalize'];
     const currentIndex = stages.indexOf(stage);
     if (currentIndex === -1) return 0;
     return ((currentIndex + 1) / 9) * 100; // 9 total stages
   };
 
-  const isComplete = (session: BOMSession) => session.stage === 'review' || (session.stage === 'subsystems' && session.complianceScore !== undefined);
+  const isComplete = (session: BOMSession) => session.stage === 'finalize' || (session.stage === 'subsystems' && session.complianceScore !== undefined);
 
-  const filteredSessions = sessions.filter((session) => {
-    const matchesSearch = session.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      session.systemType?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesFilter = 
-      filterStatus === 'all' ||
-      (filterStatus === 'complete' && isComplete(session)) ||
-      (filterStatus === 'in-progress' && !isComplete(session));
+  const filteredSessions = useMemo(() => {
+    return sessions.filter((session) => {
+      const matchesSearch = session.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        session.systemType?.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesFilter = 
+        filterStatus === 'all' ||
+        (filterStatus === 'complete' && isComplete(session)) ||
+        (filterStatus === 'in-progress' && !isComplete(session));
 
-    return matchesSearch && matchesFilter;
-  });
+      return matchesSearch && matchesFilter;
+    });
+  }, [sessions, searchQuery, filterStatus]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredSessions.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedSessions = filteredSessions.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterStatus]);
 
   const completedCount = sessions.filter(isComplete).length;
   const inProgressCount = sessions.length - completedCount;
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage);
+      // Scroll to top of list
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-blue-50 via-white to-purple-50">
@@ -190,8 +214,9 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
               )}
             </div>
           ) : (
-            <div className="grid gap-4">
-              {filteredSessions.map((session) => {
+            <>
+              <div className="grid gap-4">
+                {paginatedSessions.map((session) => {
                 const complete = isComplete(session);
                 // Use currentStageNumber if available (from LibraryPage), otherwise fallback to stage name
                 const stageNumber = (session as any).currentStageNumber;
@@ -306,7 +331,78 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
                   </button>
                 );
               })}
-            </div>
+              </div>
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="mt-8 flex items-center justify-between border-t border-gray-200 pt-6">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                      className="gap-2"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                        // Show first page, last page, current page, and pages around current
+                        if (
+                          page === 1 ||
+                          page === totalPages ||
+                          (page >= currentPage - 1 && page <= currentPage + 1)
+                        ) {
+                          return (
+                            <Button
+                              key={page}
+                              variant={currentPage === page ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => handlePageChange(page)}
+                              className="min-w-[40px]"
+                            >
+                              {page}
+                            </Button>
+                          );
+                        } else if (
+                          page === currentPage - 2 ||
+                          page === currentPage + 2
+                        ) {
+                          return (
+                            <span key={page} className="px-2 text-gray-500">
+                              ...
+                            </span>
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                      className="gap-2"
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <div className="text-sm text-gray-600">
+                    Showing <span className="font-semibold">{startIndex + 1}</span> to{' '}
+                    <span className="font-semibold">
+                      {Math.min(endIndex, filteredSessions.length)}
+                    </span>{' '}
+                    of <span className="font-semibold">{filteredSessions.length}</span> BOMs
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </main>

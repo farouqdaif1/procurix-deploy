@@ -34,7 +34,7 @@ export function CompliancePage() {
               </div>
               <div className="text-xs text-gray-600">Failed</div>
             </div>
-            <Link to="/review">
+            <Link to="/finalize">
               <Button className="gap-2">
                 <CheckCircle className="h-4 w-4" />
                 Complete & Review

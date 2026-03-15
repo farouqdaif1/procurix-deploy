@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Subsystem, Component, Requirement } from '@/app/types';
-import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, updateSubsystem, type SubsystemRequirementItem } from '@/app/services/api';
+import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, updateSubsystem, type SubsystemRequirementItem, type SubsystemDetailsResponse } from '@/app/services/api';
 import { 
   Grid3x3, 
   ChevronRight, 
@@ -19,7 +19,9 @@ import {
   X,
   Edit2,
   Check,
-  Filter
+  Filter,
+  GitBranch,
+  ArrowRight
 } from 'lucide-react';
 import { Button } from '@/app/shared/components/ui/button';
 import { Badge } from '@/app/shared/components/ui/badge';
@@ -56,12 +58,26 @@ interface ActualPart {
   specs: Record<string, any>;
 }
 
+interface ComponentBOMItem {
+  component_id: string;
+  quantity: number;
+}
+
+interface InternalConnection {
+  source_part: string;
+  target_part: string;
+  connection_type: string;
+  reasoning: string;
+}
+
 export function SubsystemsView({ subsystems, components, requirements, onComplete, onAddRequirements, sessionId }: SubsystemsViewProps) {
   const [selectedSubsystem, setSelectedSubsystem] = useState<Subsystem | null>(null);
   const [subsystemDetails, setSubsystemDetails] = useState<any>(null);
   const [subsystemRequirements, setSubsystemRequirements] = useState<Record<string, SubsystemRequirement[]>>({});
   const [subsystemComponents, setSubsystemComponents] = useState<Record<string, Component[]>>({});
   const [subsystemActualParts, setSubsystemActualParts] = useState<Record<string, ActualPart[]>>({});
+  const [subsystemComponentBOM, setSubsystemComponentBOM] = useState<Record<string, ComponentBOMItem[]>>({});
+  const [subsystemInternalConnections, setSubsystemInternalConnections] = useState<Record<string, InternalConnection[]>>({});
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [requirementsNotFound, setRequirementsNotFound] = useState<Record<string, boolean>>({});
   const [isAddingRequirement, setIsAddingRequirement] = useState(false);
@@ -74,7 +90,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
   });
   const [classifiedComponents, setClassifiedComponents] = useState<Component[]>(components);
   const [isRequirementsExpanded, setIsRequirementsExpanded] = useState(false);
-  const [selectedPart, setSelectedPart] = useState<ActualPart | null>(null);
+  const [selectedPart, setSelectedPart] = useState<{ componentId: string; quantity: number } | null>(null);
   const [requirementSearchQuery, setRequirementSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const [editingRequirementId, setEditingRequirementId] = useState<string | null>(null);
@@ -126,7 +142,25 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
         const detailsResponse = await getSubsystemDetails(sessionId, selectedSubsystem.id);
         setSubsystemDetails(detailsResponse);
 
-        // Store actual parts with specs
+        // Store component_bom (for display and add/remove operations)
+        if (detailsResponse.component_bom && Array.isArray(detailsResponse.component_bom)) {
+          const componentBOM: ComponentBOMItem[] = detailsResponse.component_bom.map((item: any) => ({
+            component_id: item.component_id,
+            quantity: item.quantity || 1,
+          }));
+          
+          setSubsystemComponentBOM(prev => ({
+            ...prev,
+            [selectedSubsystem.id]: componentBOM,
+          }));
+        } else {
+          setSubsystemComponentBOM(prev => ({
+            ...prev,
+            [selectedSubsystem.id]: [],
+          }));
+        }
+
+        // Store actual parts with specs (only for displaying specs)
         if (detailsResponse.actual_parts_bom && Array.isArray(detailsResponse.actual_parts_bom)) {
           const actualParts: ActualPart[] = detailsResponse.actual_parts_bom.map((part: any) => ({
             part_number: part.part_number,
@@ -137,6 +171,33 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
           setSubsystemActualParts(prev => ({
             ...prev,
             [selectedSubsystem.id]: actualParts,
+          }));
+        } else {
+          setSubsystemActualParts(prev => ({
+            ...prev,
+            [selectedSubsystem.id]: [],
+          }));
+        }
+
+        // Store internal connections (using type assertion since it's not in the type definition yet)
+        const detailsWithConnections = detailsResponse as SubsystemDetailsResponse & { internal_connections?: InternalConnection[] };
+        if (detailsWithConnections.internal_connections && Array.isArray(detailsWithConnections.internal_connections)) {
+          const connections: InternalConnection[] = detailsWithConnections.internal_connections.map((conn: any) => ({
+            source_part: conn.source_part,
+            target_part: conn.target_part,
+            connection_type: conn.connection_type || 'unknown',
+            reasoning: conn.reasoning || '',
+          }));
+          
+          setSubsystemInternalConnections(prev => ({
+            ...prev,
+            [selectedSubsystem.id]: connections,
+          }));
+        } else {
+          // Clear connections if not present
+          setSubsystemInternalConnections(prev => ({
+            ...prev,
+            [selectedSubsystem.id]: [],
           }));
         }
 
@@ -288,6 +349,35 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     return subsystemActualParts[subsystemId] || [];
   };
 
+  const getSubsystemComponentBOM = (subsystemId: string): ComponentBOMItem[] => {
+    return subsystemComponentBOM[subsystemId] || [];
+  };
+
+  const getSubsystemInternalConnections = (subsystemId: string): InternalConnection[] => {
+    return subsystemInternalConnections[subsystemId] || [];
+  };
+
+  // Get specs for a component_id from actual_parts_bom
+  const getPartSpecs = (subsystemId: string, componentId: string): ActualPart | null => {
+    const actualParts = getSubsystemActualParts(subsystemId);
+    return actualParts.find(p => p.part_number === componentId) || null;
+  };
+
+  const getConnectionTypeColor = (connectionType: string) => {
+    switch (connectionType.toLowerCase()) {
+      case 'power':
+        return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+      case 'signal':
+        return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'data':
+        return 'bg-green-100 text-green-700 border-green-200';
+      case 'ground':
+        return 'bg-gray-100 text-gray-700 border-gray-200';
+      default:
+        return 'bg-purple-100 text-purple-700 border-purple-200';
+    }
+  };
+
   const handleAddPart = async () => {
     if (!selectedSubsystem || !sessionId || !subsystemDetails) return;
     
@@ -298,53 +388,59 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
 
     setIsAddingPart(true);
     try {
-      // Get current parts list
-      const currentParts = getSubsystemActualParts(selectedSubsystem.id);
+      // Get current component_bom list
+      const currentBOM = getSubsystemComponentBOM(selectedSubsystem.id);
       
-      // Check if part already exists
-      const existingPartIndex = currentParts.findIndex(
-        p => p.part_number === addPartForm.part_number.trim()
+      // Check if component already exists
+      const existingPartIndex = currentBOM.findIndex(
+        item => item.component_id === addPartForm.part_number.trim()
       );
 
-      let updatedParts: ActualPart[];
+      let updatedBOM: ComponentBOMItem[];
       if (existingPartIndex >= 0) {
-        // Update quantity if part already exists
-        updatedParts = currentParts.map((part, index) =>
+        // Update quantity if component already exists
+        updatedBOM = currentBOM.map((item, index) =>
           index === existingPartIndex
-            ? { ...part, quantity: part.quantity + (addPartForm.quantity || 1) }
-            : part
+            ? { ...item, quantity: item.quantity + (addPartForm.quantity || 1) }
+            : item
         );
       } else {
-        // Add new part
-        updatedParts = [
-          ...currentParts,
+        // Add new component
+        updatedBOM = [
+          ...currentBOM,
           {
-            part_number: addPartForm.part_number.trim(),
+            component_id: addPartForm.part_number.trim(),
             quantity: addPartForm.quantity || 1,
-            specs: {},
           },
         ];
       }
 
-      // Update subsystem using PUT
+      // Update subsystem using PUT - only update component_bom, keep actual_parts_bom as is
       const response = await updateSubsystem(sessionId, selectedSubsystem.id, {
         name: subsystemDetails.name,
         description: subsystemDetails.description,
-        component_bom: subsystemDetails.component_bom || [],
-        actual_parts_bom: updatedParts,
+        component_bom: updatedBOM,
+        actual_parts_bom: subsystemDetails.actual_parts_bom || [],
         requirements: subsystemDetails.requirements || {},
       });
 
       if (response.success || response.subsystem) {
-        // Update local state with new parts list
-        setSubsystemActualParts(prev => ({
+        // Update local state with new component_bom
+        setSubsystemComponentBOM(prev => ({
           ...prev,
-          [selectedSubsystem.id]: updatedParts,
+          [selectedSubsystem.id]: updatedBOM,
         }));
 
         // Update subsystem details if returned
         if (response.subsystem) {
           setSubsystemDetails(response.subsystem);
+          // Also update component_bom from response
+          if (response.subsystem.component_bom) {
+            setSubsystemComponentBOM(prev => ({
+              ...prev,
+              [selectedSubsystem.id]: response.subsystem!.component_bom,
+            }));
+          }
         }
 
         toast.success('Part added successfully!');
@@ -361,43 +457,50 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
     }
   };
 
-  const handleRemovePart = async (partNumber: string) => {
+  const handleRemovePart = async (componentId: string) => {
     if (!selectedSubsystem || !sessionId || !subsystemDetails) return;
 
     // Confirm removal
-    if (!confirm(`Are you sure you want to remove part "${partNumber}" from this subsystem?`)) {
+    if (!confirm(`Are you sure you want to remove part "${componentId}" from this subsystem?`)) {
       return;
     }
 
-    setIsRemovingPart(partNumber);
+    setIsRemovingPart(componentId);
     try {
-      // Get current parts list and remove the part
-      const currentParts = getSubsystemActualParts(selectedSubsystem.id);
-      const updatedParts = currentParts.filter(p => p.part_number !== partNumber);
+      // Get current component_bom list and remove the component
+      const currentBOM = getSubsystemComponentBOM(selectedSubsystem.id);
+      const updatedBOM = currentBOM.filter(item => item.component_id !== componentId);
 
-      // Update subsystem using PUT
+      // Update subsystem using PUT - only update component_bom, keep actual_parts_bom as is
       const response = await updateSubsystem(sessionId, selectedSubsystem.id, {
         name: subsystemDetails.name,
         description: subsystemDetails.description,
-        component_bom: subsystemDetails.component_bom || [],
-        actual_parts_bom: updatedParts,
+        component_bom: updatedBOM,
+        actual_parts_bom: subsystemDetails.actual_parts_bom || [],
         requirements: subsystemDetails.requirements || {},
       });
 
       if (response.success || response.subsystem) {
-        // Update local state with new parts list
-        setSubsystemActualParts(prev => ({
+        // Update local state with new component_bom
+        setSubsystemComponentBOM(prev => ({
           ...prev,
-          [selectedSubsystem.id]: updatedParts,
+          [selectedSubsystem.id]: updatedBOM,
         }));
 
         // Update subsystem details if returned
         if (response.subsystem) {
           setSubsystemDetails(response.subsystem);
+          // Also update component_bom from response
+          if (response.subsystem.component_bom) {
+            setSubsystemComponentBOM(prev => ({
+              ...prev,
+              [selectedSubsystem.id]: response.subsystem!.component_bom,
+            }));
+          }
         }
 
         // Clear selected part if it was removed
-        if (selectedPart?.part_number === partNumber) {
+        if (selectedPart?.componentId === componentId) {
           setSelectedPart(null);
         }
 
@@ -1171,12 +1274,113 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
               )}
             </div>
 
+            {/* Internal Connections Section */}
+            <div className="rounded-xl border-2 border-gray-200 bg-white p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <GitBranch className="h-5 w-5 text-green-600" />
+                  Internal Connections ({getSubsystemInternalConnections(selectedSubsystem.id).length})
+                </h2>
+              </div>
+              {isLoadingDetails ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading connections...</p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {getSubsystemInternalConnections(selectedSubsystem.id).length > 0 ? (
+                    <div className="space-y-4">
+                      {getSubsystemInternalConnections(selectedSubsystem.id).map((connection, index) => {
+                        const sourcePart = getSubsystemActualParts(selectedSubsystem.id).find(
+                          p => p.part_number === connection.source_part
+                        );
+                        const targetPart = getSubsystemActualParts(selectedSubsystem.id).find(
+                          p => p.part_number === connection.target_part
+                        );
+                        
+                        return (
+                          <motion.div
+                            key={`${connection.source_part}-${connection.target_part}-${index}`}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.1 }}
+                            className="rounded-lg border-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white p-4 hover:border-green-300 hover:shadow-md transition-all"
+                          >
+                            <div className="flex items-center gap-4">
+                              {/* Source Part */}
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div className="rounded-lg bg-blue-100 p-2">
+                                    <Package className="h-4 w-4 text-blue-600" />
+                                  </div>
+                                  <div>
+                                    <div className="font-semibold text-gray-900 text-sm">
+                                      {connection.source_part}
+                                    </div>
+                                    {sourcePart && sourcePart.quantity > 1 && (
+                                      <div className="text-xs text-gray-500">Quantity: {sourcePart.quantity}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Arrow */}
+                              <div className="flex flex-col items-center gap-1">
+                                <ArrowRight className="h-5 w-5 text-gray-400" />
+                                <Badge className={`${getConnectionTypeColor(connection.connection_type)} text-xs font-medium`}>
+                                  {connection.connection_type}
+                                </Badge>
+                              </div>
+
+                              {/* Target Part */}
+                              <div className="flex-1 text-right">
+                                <div className="flex items-center gap-2 justify-end mb-1">
+                                  <div>
+                                    <div className="font-semibold text-gray-900 text-sm">
+                                      {connection.target_part}
+                                    </div>
+                                    {targetPart && targetPart.quantity > 1 && (
+                                      <div className="text-xs text-gray-500">Quantity: {targetPart.quantity}</div>
+                                    )}
+                                  </div>
+                                  <div className="rounded-lg bg-green-100 p-2">
+                                    <Package className="h-4 w-4 text-green-600" />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Reasoning */}
+                            {connection.reasoning && connection.reasoning.trim() && (
+                              <div className="mt-3 pt-3 border-t border-gray-200">
+                                <div className="text-xs font-medium text-gray-500 mb-1">Reasoning:</div>
+                                <div className="text-sm text-gray-700 italic">{connection.reasoning}</div>
+                              </div>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12">
+                      <GitBranch className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600 mb-2">No internal connections defined</p>
+                      <p className="text-sm text-gray-500">Connections between parts in this subsystem will appear here</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
             {/* Parts Section */}
             <div className="rounded-xl border-2 border-gray-200 bg-white p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                   <Package className="h-5 w-5 text-blue-600" />
-                  Parts ({getSubsystemActualParts(selectedSubsystem.id).length})
+                  Parts ({getSubsystemComponentBOM(selectedSubsystem.id).length})
                 </h2>
                 <Button
                   onClick={() => setShowAddPartModal(true)}
@@ -1196,55 +1400,60 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {getSubsystemActualParts(selectedSubsystem.id).map((part) => (
-                    <div
-                      key={part.part_number}
-                      className={`rounded-lg border p-3 transition-all ${
-                        selectedPart?.part_number === part.part_number
-                          ? 'border-blue-500 bg-blue-50 shadow-md'
-                          : 'border-gray-200 bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <button
-                          onClick={() => setSelectedPart(part)}
-                          className="flex-1 text-left"
-                        >
-                          <div className="font-semibold text-sm text-gray-900">{part.part_number}</div>
-                        </button>
-                        <div className="flex items-center gap-2">
-                          {part.quantity > 1 && (
-                            <Badge className="bg-blue-100 text-blue-700 text-xs">x{part.quantity}</Badge>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-red-600 hover:text-red-700 hover:bg-red-50"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemovePart(part.part_number);
-                            }}
-                            disabled={isRemovingPart === part.part_number}
-                          >
-                            {isRemovingPart === part.part_number ? (
-                              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600" />
-                            ) : (
-                              <X className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setSelectedPart(part)}
-                        className="text-xs text-gray-500 w-full text-left"
+                  {getSubsystemComponentBOM(selectedSubsystem.id).map((item) => {
+                    const partSpecs = getPartSpecs(selectedSubsystem.id, item.component_id);
+                    const hasSpecs = partSpecs && Object.keys(partSpecs.specs).length > 0;
+                    
+                    return (
+                      <div
+                        key={item.component_id}
+                        className={`rounded-lg border p-3 transition-all ${
+                          selectedPart?.componentId === item.component_id
+                            ? 'border-blue-500 bg-blue-50 shadow-md'
+                            : 'border-gray-200 bg-gray-50'
+                        }`}
                       >
-                        {Object.keys(part.specs).length > 0 
-                          ? `${Object.keys(part.specs).length} specs available`
-                          : 'No specs available'}
-                      </button>
-                    </div>
-                  ))}
-                  {getSubsystemActualParts(selectedSubsystem.id).length === 0 && (
+                        <div className="flex items-start justify-between mb-2">
+                          <button
+                            onClick={() => setSelectedPart({ componentId: item.component_id, quantity: item.quantity })}
+                            className="flex-1 text-left"
+                          >
+                            <div className="font-semibold text-sm text-gray-900">{item.component_id}</div>
+                          </button>
+                          <div className="flex items-center gap-2">
+                            {item.quantity > 1 && (
+                              <Badge className="bg-blue-100 text-blue-700 text-xs">x{item.quantity}</Badge>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemovePart(item.component_id);
+                              }}
+                              disabled={isRemovingPart === item.component_id}
+                            >
+                              {isRemovingPart === item.component_id ? (
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600" />
+                              ) : (
+                                <X className="h-3 w-3" />
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setSelectedPart({ componentId: item.component_id, quantity: item.quantity })}
+                          className="text-xs text-gray-500 w-full text-left"
+                        >
+                          {hasSpecs 
+                            ? `${Object.keys(partSpecs!.specs).length} specs available`
+                            : 'No specs available'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {getSubsystemComponentBOM(selectedSubsystem.id).length === 0 && (
                     <div className="col-span-full text-center py-8">
                       <Package className="h-12 w-12 text-gray-400 mx-auto mb-3" />
                       <p className="text-gray-600 mb-2">No parts in this subsystem</p>
@@ -1264,82 +1473,86 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
             </div>
 
             {/* Part Specs Section */}
-            {selectedPart && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-cyan-50 p-6"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-lg bg-blue-100 p-2">
-                      <Package className="h-5 w-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900">Part Specifications</h2>
-                      <p className="text-sm text-gray-600">{selectedPart.part_number}</p>
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => {
-                      setSelectedPart(null);
-                    }}
-                  >
-                    <X className="h-5 w-5" />
-                  </Button>
-                </div>
-
-                {/* Current Part Header */}
-                <div className="rounded-lg border-2 border-blue-300 bg-white p-4 mb-6">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-gray-900 text-lg">{selectedPart.part_number}</h3>
-                      {selectedPart.quantity > 1 && (
-                        <Badge className="bg-blue-100 text-blue-700">Quantity: {selectedPart.quantity}</Badge>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* View Mode - Display Actual Part Specs */}
-                <div className="space-y-4">
-                  {/* Quantity Info */}
-                  {selectedPart.quantity > 1 && (
-                    <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
-                      <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">
-                        Quantity
+            {selectedPart && (() => {
+              const partSpecs = getPartSpecs(selectedSubsystem.id, selectedPart.componentId);
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-cyan-50 p-6"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-lg bg-blue-100 p-2">
+                        <Package className="h-5 w-5 text-blue-600" />
                       </div>
-                      <div className="text-lg font-bold text-blue-900">
-                        {selectedPart.quantity} units
+                      <div>
+                        <h2 className="text-xl font-bold text-gray-900">Part Specifications</h2>
+                        <p className="text-sm text-gray-600">{selectedPart.componentId}</p>
                       </div>
                     </div>
-                  )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        setSelectedPart(null);
+                      }}
+                    >
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </div>
 
-                  {/* Specifications Grid - Dynamic from API */}
-                  {Object.keys(selectedPart.specs).length > 0 ? (
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {Object.entries(selectedPart.specs).map(([key, value]) => (
-                        <div key={key} className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                          </div>
-                          <div className="text-sm font-bold text-gray-900 break-words">
-                            {String(value)}
-                          </div>
+                  {/* Current Part Header */}
+                  <div className="rounded-lg border-2 border-blue-300 bg-white p-4 mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-gray-900 text-lg">{selectedPart.componentId}</h3>
+                        {selectedPart.quantity > 1 && (
+                          <Badge className="bg-blue-100 text-blue-700">Quantity: {selectedPart.quantity}</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* View Mode - Display Actual Part Specs from actual_parts_bom */}
+                  <div className="space-y-4">
+                    {/* Quantity Info */}
+                    {selectedPart.quantity > 1 && (
+                      <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
+                        <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">
+                          Quantity
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-lg bg-gray-50 border border-gray-200 p-8 text-center">
-                      <AlertCircle className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                      <p className="text-sm text-gray-600">No specifications available for this part</p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
+                        <div className="text-lg font-bold text-blue-900">
+                          {selectedPart.quantity} units
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Specifications Grid - Dynamic from actual_parts_bom */}
+                    {partSpecs && Object.keys(partSpecs.specs).length > 0 ? (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {Object.entries(partSpecs.specs).map(([key, value]) => (
+                          <div key={key} className="rounded-lg bg-white border border-gray-200 p-4">
+                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                              {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            </div>
+                            <div className="text-sm font-bold text-gray-900 break-words">
+                              {String(value)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg bg-gray-50 border border-gray-200 p-8 text-center">
+                        <AlertCircle className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-sm text-gray-600">No specifications available for this part</p>
+                        <p className="text-xs text-gray-500 mt-1">Specs are loaded from actual_parts_bom</p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })()}
           </div>
         </div>
 
@@ -1523,33 +1736,33 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                     Mapped Components
                   </label>
                   <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3">
-                    {getSubsystemActualParts(selectedSubsystem.id).map((part) => (
-                      <label key={part.part_number} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                    {getSubsystemComponentBOM(selectedSubsystem.id).map((item) => (
+                      <label key={item.component_id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
                         <input
                           type="checkbox"
-                          checked={createRequirementForm.mapped_components.includes(part.part_number)}
+                          checked={createRequirementForm.mapped_components.includes(item.component_id)}
                           onChange={(e) => {
                             if (e.target.checked) {
                               setCreateRequirementForm(prev => ({
                                 ...prev,
-                                mapped_components: [...prev.mapped_components, part.part_number]
+                                mapped_components: [...prev.mapped_components, item.component_id]
                               }));
                             } else {
                               setCreateRequirementForm(prev => ({
                                 ...prev,
-                                mapped_components: prev.mapped_components.filter(id => id !== part.part_number)
+                                mapped_components: prev.mapped_components.filter(id => id !== item.component_id)
                               }));
                             }
                           }}
                           className="rounded border-gray-300"
                         />
                         <span className="text-sm text-gray-700">
-                          {part.part_number}
-                          {part.quantity > 1 && <span className="text-gray-500 ml-1">(x{part.quantity})</span>}
+                          {item.component_id}
+                          {item.quantity > 1 && <span className="text-gray-500 ml-1">(x{item.quantity})</span>}
                         </span>
                       </label>
                     ))}
-                    {getSubsystemActualParts(selectedSubsystem.id).length === 0 && (
+                    {getSubsystemComponentBOM(selectedSubsystem.id).length === 0 && (
                       <p className="text-sm text-gray-500">No parts available</p>
                     )}
                   </div>
@@ -1648,7 +1861,7 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 </button>
               </div>
               <Button onClick={onComplete} size="lg" className="gap-2">
-                Continue to Review
+                Continue to Finalize
                 <ChevronRight className="h-5 w-5" />
               </Button>
             </div>

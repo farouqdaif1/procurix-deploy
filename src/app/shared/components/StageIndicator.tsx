@@ -17,7 +17,7 @@ const allStages: { id: SessionStage; label: string; icon: any; stageNumber: numb
   { id: 'architecture', label: 'Architecture', icon: Layers, stageNumber: 6 },
 
   { id: 'subsystems', label: 'Subsystems', icon: Box, stageNumber: 7 },
-  { id: 'review', label: 'Review', icon: ClipboardCheck, stageNumber: 8 },
+  { id: 'finalize', label: 'Finalize', icon: ClipboardCheck, stageNumber: 8 },
 ];
 
 // Filter out commented stages

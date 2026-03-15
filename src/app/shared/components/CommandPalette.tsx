@@ -50,7 +50,7 @@ export function CommandPalette({ open, onClose, onCommand }: CommandPaletteProps
     { id: 'requirements', label: 'Requirements Analysis', icon: FileText, group: 'Workflow' },
     { id: 'subsystems', label: 'Subsystems', icon: Box, group: 'Workflow' },
     { id: 'compliance', label: 'Compliance Analysis', icon: CheckCircle, group: 'Workflow' },
-    { id: 'review', label: 'Review', icon: ClipboardCheck, group: 'Workflow' },
+    { id: 'finalize', label: 'Finalize', icon: ClipboardCheck, group: 'Workflow' },
     { id: 'completed', label: 'Completed BOMs', icon: CheckCircle2, group: 'Navigation' },
   ];
 

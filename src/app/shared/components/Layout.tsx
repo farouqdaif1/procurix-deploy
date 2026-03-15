@@ -93,7 +93,7 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
       architecture: '/architecture',
       requirements: '/requirements',
       subsystems: '/subsystems',
-      review: '/review',
+      finalize: '/finalize',
       completed: '/completed',
     };
     
