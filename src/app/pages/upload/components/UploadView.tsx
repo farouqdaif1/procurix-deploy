@@ -171,7 +171,7 @@ export function UploadView({ onUploadComplete, onProceedToClassification }: Uplo
                   size="lg"
                   className="gap-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
                 >
-                  <span>Proceed to Classification</span>
+                  <span>Proceed to System Analysis</span>
                   <ArrowRight className="h-5 w-5" />
                 </Button>
               </div>

@@ -13,8 +13,8 @@
 export function getRouteForStage(stageNumber: number): string {
   const stageRouteMap: Record<number, string> = {
     1: '/upload',           // Upload & Parse
-    2: '/fundamental',      // Classification
-    3: '/analysis',         // System Analysis
+    2: '/system-identification', // System Identification + HITL (before classification)
+    3: '/part-identification',  // Part Identification (uses confirmed system type)
     4: '/validate',         // Validation
     5: '/requirements',     // Requirements
     6: '/architecture',     // Part Connections

@@ -42,8 +42,8 @@ export function CommandPalette({ open, onClose, onCommand }: CommandPaletteProps
     { id: 'home', label: 'Library', icon: Home, group: 'Navigation' },
     { id: 'upload', label: 'Upload BOM', icon: Upload, group: 'Workflow' },
     // { id: 'discovery', label: 'System Discovery', icon: Sparkles, group: 'Workflow' }, // Commented out
-    { id: 'fundamental', label: 'Fundamental Classification', icon: Filter, group: 'Workflow' },
-    { id: 'analysis', label: 'System Analysis', icon: Sparkles, group: 'Workflow' },    // { id: 'identify', label: 'Identify Components', icon: Zap, group: 'Workflow' }, // Commented out
+    { id: 'part-identification', label: 'Part Identification', icon: Filter, group: 'Workflow' },
+    { id: 'system-identification', label: 'System Identification', icon: Sparkles, group: 'Workflow' },    // { id: 'identify', label: 'Identify Components', icon: Zap, group: 'Workflow' }, // Commented out
     { id: 'identify', label: 'Identify Components', icon: Zap, group: 'Workflow' }, // Commented out
 
     { id: 'architecture', label: 'System Architecture', icon: Layers, group: 'Workflow' },

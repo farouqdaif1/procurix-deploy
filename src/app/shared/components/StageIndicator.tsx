@@ -10,8 +10,8 @@ interface StageIndicatorProps {
 const allStages: { id: SessionStage; label: string; icon: any; stageNumber: number }[] = [
   { id: 'upload', label: 'Upload', icon: Upload, stageNumber: 1 },
   // { id: 'discovery', label: 'Discovery', icon: Sparkles }, // Commented out
-  { id: 'fundamental', label: 'Classify', icon: Filter, stageNumber: 2 },
-  { id: 'analysis', label: 'Analysis', icon: Sparkles, stageNumber: 3 },
+  { id: 'system-identification', label: 'System Identification', icon: Sparkles, stageNumber: 2 },
+  { id: 'part-identification', label: 'Part Identification', icon: Filter, stageNumber: 3 },
   { id: 'validate', label: 'Validate', icon: Zap, stageNumber: 4 }, // Commented out
   { id: 'requirements', label: 'Requirements', icon: FileText, stageNumber: 5 },
   { id: 'architecture', label: 'Architecture', icon: Layers, stageNumber: 6 },

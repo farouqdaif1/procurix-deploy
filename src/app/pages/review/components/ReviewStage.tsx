@@ -25,11 +25,11 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface ReviewStageProps {
   session: BOMSession;
-  onNavigateToStage: (stage: 'upload' | 'discovery' | 'identify' | 'fundamental' | 'architecture' | 'requirements' | 'subsystems') => void;
+  onNavigateToStage: (stage: 'upload' | 'discovery' | 'identify' | 'part-identification' | 'architecture' | 'requirements' | 'subsystems') => void;
   onSubmit?: () => void;
 }
 
-type ExpandedSection = 'upload' | 'discovery' | 'identify' | 'fundamental' | 'architecture' | 'requirements' | 'subsystems' | null;
+type ExpandedSection = 'upload' | 'discovery' | 'identify' | 'part-identification' | 'architecture' | 'requirements' | 'subsystems' | null;
 
 export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStageProps) {
   const [expandedSection, setExpandedSection] = useState<ExpandedSection>(null);
@@ -38,7 +38,7 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
     setExpandedSection(expandedSection === section ? null : section);
   };
 
-  const fundamentalComponents = session.components.filter(c => c.isFundamental === true);
+  const partIdentificationComponents = session.components.filter(c => c.isFundamental === true);
   const auxiliaryComponents = session.components.filter(c => c.isFundamental === false);
   const compliantComponents = session.components.filter(c => c.complianceStatus === 'compliant');
   const failedComponents = session.components.filter(c => c.complianceStatus === 'failed');
@@ -69,12 +69,12 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
       summary: `${session.components.filter(c => c.isIdentified).length} components identified with part numbers`,
     },
     {
-      id: 'fundamental' as const,
+      id: 'part-identification' as const,
       icon: Filter,
-      title: 'Fundamental Classification',
+      title: 'Part Identification',
       subtitle: 'Essential vs auxiliary',
       color: 'green',
-      summary: `${fundamentalComponents.length} fundamental, ${auxiliaryComponents.length} auxiliary`,
+      summary: `${partIdentificationComponents.length} identified, ${auxiliaryComponents.length} auxiliary`,
     },
     {
       id: 'architecture' as const,
@@ -385,7 +385,7 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
                           </div>
                         )}
 
-                        {section.id === 'fundamental' && (
+                        {section.id === 'part-identification' && (
                           <div>
                             <h4 className="font-semibold text-gray-900 mb-4">Classification Results</h4>
                             <div className="grid grid-cols-2 gap-4 mb-4">
@@ -394,9 +394,9 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
                                   <CheckCircle2 className="h-5 w-5 text-green-600" />
                                   <span className="text-sm font-semibold text-gray-700">Fundamental Components</span>
                                 </div>
-                                <div className="text-3xl font-bold text-green-600 mb-1">{fundamentalComponents.length}</div>
+                                <div className="text-3xl font-bold text-green-600 mb-1">{partIdentificationComponents.length}</div>
                                 <div className="text-xs text-gray-600">
-                                  {((fundamentalComponents.length / session.totalComponents) * 100).toFixed(1)}% of total BOM
+                                  {((partIdentificationComponents.length / session.totalComponents) * 100).toFixed(1)}% of total BOM
                                 </div>
                               </div>
                               <div className="rounded-lg bg-orange-50 border border-orange-200 p-4">
@@ -415,10 +415,10 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
                               <div>
                                 <div className="text-sm font-semibold text-green-700 mb-3 flex items-center gap-2">
                                   <div className="h-2 w-2 rounded-full bg-green-600" />
-                                  Fundamental Components ({fundamentalComponents.length})
+                                  Fundamental Components ({partIdentificationComponents.length})
                                 </div>
                                 <div className="space-y-2 max-h-96 overflow-auto">
-                                  {fundamentalComponents.map(c => (
+                                  {partIdentificationComponents.map(c => (
                                     <div key={c.id} className="rounded-lg bg-green-50 border border-green-200 p-3">
                                       <div className="flex items-center justify-between mb-1">
                                         <span className="text-sm font-semibold text-gray-900">{c.reference}</span>
@@ -587,7 +587,7 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
                             <div className="space-y-4">
                               {session.subsystems.map(sub => {
                                 const subComps = session.components.filter(c => c.subsystemId === sub.id);
-                                const fundamentalCount = subComps.filter(c => c.isFundamental).length;
+                                const partIdentificationCount = subComps.filter(c => c.isFundamental).length;
                                 return (
                                   <div key={sub.id} className="rounded-lg border-2 border-cyan-200 bg-cyan-50 p-4">
                                     <div className="flex items-center justify-between mb-3">
@@ -602,10 +602,10 @@ export function ReviewStage({ session, onNavigateToStage, onSubmit }: ReviewStag
                                       </div>
                                       <div className="flex gap-2">
                                         <Badge className="bg-green-100 text-green-700">
-                                          {fundamentalCount} fundamental
+                                          {partIdentificationCount} part-identification
                                         </Badge>
                                         <Badge className="bg-orange-100 text-orange-700">
-                                          {subComps.length - fundamentalCount} auxiliary
+                                          {subComps.length - partIdentificationCount} auxiliary
                                         </Badge>
                                       </div>
                                     </div>

@@ -24,8 +24,8 @@ export default function App() {
           <Route path="/" element={<LibraryPage />} />
           <Route path="/upload" element={<Layout showStageIndicator={true}><UploadPage /></Layout>} />
           {/* <Route path="/discovery" element={<Layout showStageIndicator={true}><DiscoveryPage /></Layout>} /> */}
-          <Route path="/fundamental" element={<Layout showStageIndicator={true}><FundamentalPage /></Layout>} />
-          <Route path="/analysis" element={<Layout showStageIndicator={true}><AnalysisPage /></Layout>} />
+          <Route path="/part-identification" element={<Layout showStageIndicator={true}><FundamentalPage /></Layout>} />
+          <Route path="/system-identification" element={<Layout showStageIndicator={true}><AnalysisPage /></Layout>} />
            <Route path="/validate" element={<Layout showStageIndicator={true}><ValidatePage /></Layout>} />
           <Route path="/architecture" element={<Layout showStageIndicator={true}><ArchitecturePage /></Layout>} />
           <Route path="/requirements" element={<Layout showStageIndicator={true}><RequirementsPage /></Layout>} />

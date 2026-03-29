@@ -23,7 +23,7 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
     
     const labels: Record<string, string> = {
       upload: 'Upload & Parse',
-      fundamental: 'Classification',
+      'part-identification': 'Part Identification',
       analysis: 'System Analysis',
       validate: 'Validation',
       requirements: 'Requirements',
@@ -40,7 +40,7 @@ export function BOMLibrary({ sessions, onSelectSession, onNewBOM }: BOMLibraryPr
       return (stageNumber / 9) * 100; // 9 total stages
     }
     // Fallback: calculate based on stage name
-    const stages = ['upload', 'fundamental', 'analysis', 'validate', 'requirements', 'architecture', 'subsystems', 'review'];
+    const stages = ['upload', 'part-identification', 'analysis', 'validate', 'requirements', 'architecture', 'subsystems', 'review'];
     const currentIndex = stages.indexOf(stage);
     if (currentIndex === -1) return 0;
     return ((currentIndex + 1) / 9) * 100; // 9 total stages

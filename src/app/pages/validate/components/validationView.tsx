@@ -12,7 +12,7 @@ interface ValidationViewProps {
 }
 
 export function ValidationView({ components: _components, onValidationComplete }: ValidationViewProps) {
-  const { sessionId, setCurrentStage } = useSession();
+  const { sessionId, setCurrentStage, refreshTrigger } = useSession();
   const [isValidating, setIsValidating] = useState(true);
   const [validationData, setValidationData] = useState<{
     total_parts: number;
@@ -89,7 +89,7 @@ export function ValidationView({ components: _components, onValidationComplete }
     };
 
     fetchValidation();
-  }, [sessionId, setCurrentStage]);
+  }, [sessionId, setCurrentStage, refreshTrigger]);
 
   // Filter validation results
   const filteredResults = validationData?.validation_results.filter((result) => {

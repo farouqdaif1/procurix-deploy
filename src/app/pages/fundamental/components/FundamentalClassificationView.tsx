@@ -1,668 +1,639 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Component } from '@/app/types';
-import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight, RotateCcw } from 'lucide-react';
-import { motion } from 'motion/react';
+import type { PartDetail, PartCandidate } from '@/app/services/api';
+import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight, RotateCcw, ExternalLink, ChevronDown } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { classifyParts, getClassification, bulkUpdateClassification } from '@/app/services/api';
+import { classifyPartsStream, selectPartMatch, getClassification, bulkUpdateClassification } from '@/app/services/api';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type Phase = 'research' | 'selection' | 'classify';
+
+interface StreamLine {
+  id: string;
+  mpn?: string;
+  icon: 'spin' | 'check' | 'miss' | 'cached' | 'classify';
+  text: string;
+  meta?: string;   // category · manufacturer
+  source?: string; // nexar / tavily / cache
+  multiMatch?: boolean;
+}
 
 interface FundamentalClassificationViewProps {
   components: Component[];
   onClassificationComplete: (classifiedComponents: Component[]) => void;
 }
 
-export function FundamentalClassificationView({
-  components: _components, // Unused - we create components from classification data
-  onClassificationComplete,
-}: FundamentalClassificationViewProps) {
-  const { sessionId, setCurrentStage } = useSession();
-  const [isClassifying, setIsClassifying] = useState(true);
-  const [classifyProgress, setClassifyProgress] = useState(0);
-  const [currentClassifying, setCurrentClassifying] = useState(0);
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function srcBadge(source: string | undefined | null) {
+  if (!source || source === 'unknown') return null;
+  const styles: Record<string, string> = {
+    nexar: 'bg-blue-50 text-blue-600 border-blue-200',
+    nexar_confirmed: 'bg-green-50 text-green-600 border-green-200',
+    tavily: 'bg-purple-50 text-purple-600 border-purple-200',
+    cache: 'bg-gray-50 text-gray-500 border-gray-200',
+    combined: 'bg-indigo-50 text-indigo-600 border-indigo-200',
+  };
+  const label: Record<string, string> = {
+    nexar: 'nexar', nexar_confirmed: 'confirmed', tavily: 'tavily',
+    cache: 'cached', combined: 'nexar+web',
+  };
+  const cls = styles[source] ?? styles.cache;
+  return (
+    <span className={`inline-block border text-[10px] font-medium px-1.5 py-0.5 rounded ${cls}`}>
+      {label[source] ?? source}
+    </span>
+  );
+}
+
+// ── Phase 1: Research terminal ─────────────────────────────────────────────────
+
+function ResearchPhase({ sessionId, onComplete, setCurrentStage }: {
+  sessionId: string;
+  onComplete: (result: PartDetail[]) => void;
+  setCurrentStage: (s: number | null) => void;
+}) {
+  const [lines, setLines] = useState<StreamLine[]>([]);
+  const [total, setTotal] = useState(0);
+  const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
-  const [localComponents, setLocalComponents] = useState<Component[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [classificationStats, setClassificationStats] = useState<{
-    total_parts: number;
-    auxiliary_parts: number;
-    non_auxiliary_parts: number;
-  } | null>(null);
-  const [isApplying, setIsApplying] = useState(false);
-  
-  // Track original state from GET request to detect changes
-  const originalClassificationMapRef = useRef<Record<string, 'auxiliary' | 'non-auxiliary' | null>>({});
-  const dataFromGetRef = useRef<boolean>(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const startedRef = useRef(false);
 
-  // Fetch classification data when component mounts or sessionId changes
+  const push = (line: StreamLine) =>
+    setLines(prev => [...prev, line]);
+  const replace = (id: string, update: Partial<StreamLine>) =>
+    setLines(prev => prev.map(l => l.id === id ? { ...l, ...update } : l));
+
   useEffect(() => {
-    const fetchClassification = async () => {
-      if (!sessionId) {
-        setIsClassifying(false);
-        setError('No session found. Please upload a BOM first.');
-        return;
-      }
-      
-      setIsClassifying(true);
-      setError(null);
-      setClassifyProgress(0);
-      setCurrentClassifying(0);
-      
-      try {
-        // Try GET first, fallback to POST if 404 or if all values are null
-        let classificationResult;
-        try {
-          classificationResult = await getClassification(sessionId);
-          console.log('Got classification from GET endpoint');
-          dataFromGetRef.current = true;
-          
-          // Store original classification map for change detection
-          originalClassificationMapRef.current = { ...classificationResult.classification_map };
-          
-          // Check if classification_map has all null values (classification not done yet)
-          const classificationMap = classificationResult.classification_map || {};
-          const allValuesNull = Object.values(classificationMap).every(value => value === null);
-          
-          if (allValuesNull && Object.keys(classificationMap).length > 0) {
-            console.log('Classification map has all null values, triggering classification...');
-            classificationResult = await classifyParts(sessionId, setCurrentStage);
-            console.log('Generated classification from POST endpoint');
-            dataFromGetRef.current = false;
-            // Update original map after POST classification
-            originalClassificationMapRef.current = { ...classificationResult.classification_map };
-          }
-        } catch (getError: any) {
-          // If 404, try POST to generate classification
-          if (getError.message?.includes('404') || getError.message?.includes('Failed to get classification: 404')) {
-            console.log('Classification not found, generating...');
-            classificationResult = await classifyParts(sessionId, setCurrentStage);
-            console.log('Generated classification from POST endpoint');
-            dataFromGetRef.current = false;
-            // Update original map after POST classification
-            originalClassificationMapRef.current = { ...classificationResult.classification_map };
-          } else {
-            throw getError;
-          }
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [lines]);
+
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+
+    classifyPartsStream(
+      sessionId,
+      (event) => {
+        if (event.type === 'start') {
+          setTotal(event.total);
+          push({ id: 'start', icon: 'classify', text: event.message });
+        } else if (event.type === 'searching') {
+          push({ id: event.mpn, icon: 'spin', text: `Looking up`, mpn: event.mpn });
+        } else if (event.type === 'found' || event.type === 'cached') {
+          const meta = [event.category, event.candidates?.[0]?.manufacturer].filter(Boolean).join(' · ');
+          const multi = (event.candidates?.length ?? 0) > 1 && !event.candidates?.[0]?.is_exact_match;
+          replace(event.type === 'cached' ? event.mpn : event.mpn, {
+            icon: multi ? 'miss' : 'check',
+            text: multi ? `${event.candidates!.length} candidates — review needed` : (event.category || 'found'),
+            meta,
+            source: event.source,
+            multiMatch: multi,
+          });
+        } else if (event.type === 'not_found') {
+          replace(event.mpn, { icon: 'miss', text: 'not found in Nexar', source: undefined });
+        } else if (event.type === 'classifying') {
+          push({ id: 'classifying', icon: 'classify', text: event.message });
+        } else if (event.type === 'complete') {
+          push({ id: 'done', icon: 'check', text: `Done — ${event.result.non_auxiliary_parts} fundamental, ${event.result.auxiliary_parts} auxiliary` });
+          setDone(true);
+          setTimeout(() => onComplete(event.result.parts ?? []), 600);
+        } else if (event.type === 'error') {
+          setError(event.message);
         }
-        
-        if (!classificationResult.success) {
-          throw new Error('Classification request was not successful');
-        }
-        
-        // Store classification stats
-        setClassificationStats({
-          total_parts: classificationResult.total_parts,
-          auxiliary_parts: classificationResult.auxiliary_parts,
-          non_auxiliary_parts: classificationResult.non_auxiliary_parts,
-        });
-        
-        // Create components from classification_map
-        // Create components for ALL parts in classification_map
-        const classificationEntries = Object.entries(classificationResult.classification_map);
-        console.log('Classification entries count:', classificationEntries.length);
-        console.log('Classification map:', classificationResult.classification_map);
-        
-        const createdComponents: Component[] = classificationEntries.map(
-          ([partNumber, classification], index) => {
-            // Use only API data - part_number from classification_map
-            // Handle null classification (not classified yet)
-            const isFundamental = classification === null 
-              ? undefined 
-              : classification === 'non-auxiliary' 
-                ? true 
-                : false;
-            
-            const component = {
-              id: `comp-${partNumber}-${index}`,
-              reference: partNumber, // Use part_number from API as reference
-              partNumber: partNumber, // From classification_map
-              description: partNumber, // Use part_number as description
-              type: 'IC',
-              isFundamental: isFundamental, // From classification_map (can be undefined if null)
-              isIdentified: true,
-              isGeneric: false,
-              complianceStatus: 'unknown' as const,
-              specs: {},
-            } as Component;
-            
-            return component;
-          }
-        );
-        
-        console.log('Created components:', createdComponents.length);
-        console.log('Fundamental:', createdComponents.filter(c => c.isFundamental === true).length);
-        console.log('Auxiliary:', createdComponents.filter(c => c.isFundamental === false).length);
-        console.log('All components:', createdComponents);
-        
-        // Set components immediately
-        setLocalComponents(createdComponents);
-        
-        // Simulate progress while processing
-        const totalComponents = classificationResult.total_parts;
-        let current = 0;
-        
-        const progressInterval = setInterval(() => {
-          current++;
-          setCurrentClassifying(current);
-          setClassifyProgress((current / totalComponents) * 100);
-          
-          if (current >= totalComponents) {
-            clearInterval(progressInterval);
-            
-            setIsClassifying(false);
-            toast.success(`Classification complete: ${classificationResult.non_auxiliary_parts} non-auxiliary, ${classificationResult.auxiliary_parts} auxiliary parts`);
-          }
-        }, 50);
-        
-      } catch (error) {
-        setIsClassifying(false);
-        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch classification';
-        setError(errorMessage);
-        toast.error(errorMessage);
-        setLocalComponents([]);
-      }
-    };
-    
-    fetchClassification();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+      },
+      setCurrentStage,
+    ).catch(e => setError(String(e)));
+  }, []);
 
-  const handleClassify = (componentId: string, isFundamental: boolean) => {
-    const component = localComponents.find((c) => c.id === componentId);
-    
-    // Validate component and partNumber
-    if (!component) {
-      toast.error('Component not found');
-      return;
-    }
-    
-    if (!component.partNumber || component.partNumber.trim() === '') {
-      toast.error('Part number is missing or invalid');
-      console.error('Component missing partNumber:', component);
-      return;
-    }
-
-    // Determine new classification based on isFundamental
-    // isFundamental = true means non-auxiliary, false means auxiliary
-    const newClassification: 'auxiliary' | 'non-auxiliary' = isFundamental ? 'non-auxiliary' : 'auxiliary';
-    const oldClassification: 'auxiliary' | 'non-auxiliary' | null = component.isFundamental === true 
-      ? 'non-auxiliary' 
-      : component.isFundamental === false 
-        ? 'auxiliary' 
-        : null;
-
-    // If classification hasn't changed, do nothing
-    if (newClassification === oldClassification) {
-      return;
-    }
-
-    // Update UI locally (no API call yet)
-    setLocalComponents((prev) =>
-      prev.map((c) => (c.id === componentId ? { ...c, isFundamental } : c))
-    );
+  const iconEl = (icon: StreamLine['icon']) => {
+    if (icon === 'spin') return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400 shrink-0" />;
+    if (icon === 'check') return <span className="text-green-500 shrink-0 font-bold text-xs">✓</span>;
+    if (icon === 'miss') return <span className="text-yellow-500 shrink-0 font-bold text-xs">?</span>;
+    if (icon === 'cached') return <span className="text-blue-400 shrink-0 font-bold text-xs">↩</span>;
+    return <span className="text-gray-400 shrink-0 text-xs">·</span>;
   };
 
-  // Calculate pending changes by comparing current state with original state
-  const getPendingChanges = () => {
-    const changes: Array<{ mpn: string; new_classification: 'auxiliary' | 'non-auxiliary' }> = [];
-    
-    localComponents.forEach((component) => {
-      if (!component.partNumber) return;
-      
-      const mpn = component.partNumber.trim();
-      const originalClassification = originalClassificationMapRef.current[mpn];
-      
-      // Determine current classification
-      const currentClassification: 'auxiliary' | 'non-auxiliary' | null = component.isFundamental === true 
-        ? 'non-auxiliary' 
-        : component.isFundamental === false 
-          ? 'auxiliary' 
-          : null;
-      
-      // Only include if it's different from original
-      if (currentClassification !== originalClassification && currentClassification !== null) {
-        changes.push({
-          mpn,
-          new_classification: currentClassification,
-        });
-      }
-    });
-    
-    return changes;
-  };
+  return (
+    <div className="h-full flex flex-col bg-gray-950 font-mono text-sm">
+      {/* Header */}
+      <div className="shrink-0 px-6 py-3 border-b border-gray-800 flex items-center justify-between">
+        <span className="text-gray-300 text-xs font-semibold tracking-wide">PART RESEARCH</span>
+        {total > 0 && (
+          <span className="text-gray-500 text-xs">{Math.min(lines.filter(l => l.mpn).length, total)} / {total}</span>
+        )}
+      </div>
 
-  const handleResetChanges = () => {
-    // Restore components to their original classification state
-    setLocalComponents((prev) =>
-      prev.map((component) => {
-        if (!component.partNumber) return component;
-        
-        const mpn = component.partNumber.trim();
-        const originalClassification = originalClassificationMapRef.current[mpn];
-        
-        // Convert original classification back to isFundamental
-        const isFundamental = originalClassification === null
-          ? undefined
-          : originalClassification === 'non-auxiliary'
-            ? true
-            : false;
-        
-        return {
-          ...component,
-          isFundamental,
-        };
-      })
-    );
-    
-    toast.success('Changes reset to original classification');
-  };
+      {/* Stream */}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-1.5">
+        <AnimatePresence initial={false}>
+          {lines.map(line => (
+            <motion.div
+              key={line.id}
+              initial={{ opacity: 0, y: 3 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.08 }}
+              className="flex items-start gap-3"
+            >
+              <div className="mt-0.5 w-4 flex justify-center">{iconEl(line.icon)}</div>
+              <div className="flex-1 min-w-0">
+                {line.mpn && (
+                  <span className="text-blue-400 font-medium mr-2">{line.mpn}</span>
+                )}
+                <span className={line.icon === 'check' ? 'text-gray-200' : line.icon === 'miss' ? 'text-yellow-400' : 'text-gray-400'}>
+                  {line.text}
+                </span>
+                {line.meta && <span className="text-gray-600 ml-2 text-xs">{line.meta}</span>}
+                {line.source && <span className="ml-2">{srcBadge(line.source)}</span>}
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
 
-  const handleApplyClassification = async () => {
-    if (!sessionId) {
-      toast.error('Session ID is missing');
-      return;
-    }
+        {error && (
+          <div className="text-red-400 text-xs mt-2 border border-red-800 rounded px-3 py-2 bg-red-950/40">
+            {error}
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
 
-    const pendingChanges = getPendingChanges();
-    
-    if (pendingChanges.length === 0) {
-      toast.info('No changes to apply');
-      return;
-    }
+      {/* Progress bar */}
+      {total > 0 && !done && (
+        <div className="shrink-0 px-6 pb-4">
+          <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-blue-500"
+              animate={{ width: `${(lines.filter(l => l.mpn).length / total) * 100}%` }}
+              transition={{ duration: 0.3 }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-    setIsApplying(true);
+// ── Phase 2: MPN Selection ─────────────────────────────────────────────────────
 
+function SelectionPhase({ parts, onComplete }: {
+  parts: PartDetail[];
+  onComplete: (parts: PartDetail[]) => void;
+}) {
+  const { sessionId } = useSession();
+  // Only show parts that have multiple candidates AND no exact match
+  const needsSelection = parts.filter(
+    p => (p.candidates?.length ?? 0) > 1 && !p.candidates?.[0]?.is_exact_match
+  );
+
+  const [selections, setSelections] = useState<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    needsSelection.forEach(p => { m[p.part_number] = 0; });
+    return m;
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleConfirm = async () => {
+    if (!sessionId) return;
+    setSaving(true);
     try {
-      console.log('Applying bulk classification updates:', { partsCount: pendingChanges.length });
-      // Pass setCurrentStage to automatically update stage after PUT
-      const result = await bulkUpdateClassification(sessionId, pendingChanges, setCurrentStage);
-
-      // Update stats from API response
-      if (result.statistics && classificationStats) {
-        setClassificationStats({
-          total_parts: result.statistics.total_parts,
-          auxiliary_parts: result.statistics.exempt_count, // exempt_count = auxiliary parts
-          non_auxiliary_parts: result.statistics.candidates_count, // candidates_count = non-auxiliary parts
-        });
+      for (const p of needsSelection) {
+        const idx = selections[p.part_number] ?? 0;
+        const candidate = p.candidates[idx];
+        await selectPartMatch(sessionId, p.part_number, candidate);
       }
-
-      // Update original map to reflect applied changes
-      pendingChanges.forEach((change) => {
-        originalClassificationMapRef.current[change.mpn] = change.new_classification;
+      // Merge selections back into parts
+      const updated = parts.map(p => {
+        const idx = selections[p.part_number];
+        if (idx === undefined) return p;
+        const c = p.candidates[idx];
+        return { ...p, category: c.category, description: c.description, manufacturer: c.manufacturer, confidence: c.confidence };
       });
+      onComplete(updated);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
-      toast.success(result.message || `Successfully applied ${pendingChanges.length} classification changes`);
-      
-      // Redirect to next step after successful apply
-      onClassificationComplete(localComponents);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to apply classification';
-      toast.error(errorMessage);
+  if (needsSelection.length === 0) {
+    onComplete(parts);
+    return null;
+  }
+
+  return (
+    <div className="h-full flex flex-col bg-gray-50">
+      <div className="shrink-0 px-8 py-5 bg-white border-b">
+        <h2 className="text-lg font-semibold text-gray-900">Confirm Part Matches</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          {needsSelection.length} part{needsSelection.length !== 1 ? 's' : ''} with ambiguous Nexar results — pick the correct match.
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4">
+        {needsSelection.map(part => (
+          <div key={part.part_number} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="font-mono font-bold text-gray-900">{part.part_number}</span>
+              <span className="text-xs text-yellow-600 bg-yellow-50 border border-yellow-200 px-2 py-0.5 rounded-full">
+                {part.candidates.length} matches
+              </span>
+            </div>
+            <div className="grid gap-2">
+              {part.candidates.map((c, i) => (
+                <button
+                  key={c.mpn}
+                  onClick={() => setSelections(prev => ({ ...prev, [part.part_number]: i }))}
+                  className={`text-left rounded-lg border p-3 transition-all ${
+                    selections[part.part_number] === i
+                      ? 'border-blue-500 bg-blue-50 shadow-sm'
+                      : 'border-gray-200 hover:border-blue-300'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-mono text-sm font-semibold text-gray-900">{c.mpn}</div>
+                      {c.category && <div className="text-xs text-gray-600 mt-0.5">{c.category}</div>}
+                      {c.description && <div className="text-xs text-gray-400 truncate mt-0.5">{c.description}</div>}
+                      {c.manufacturer && <div className="text-xs text-gray-500 mt-1">{c.manufacturer}</div>}
+                    </div>
+                    <div className="shrink-0 flex flex-col items-end gap-1">
+                      {c.is_exact_match && (
+                        <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">exact</span>
+                      )}
+                      {c.datasheet_url && (
+                        <a href={c.datasheet_url} target="_blank" rel="noopener noreferrer"
+                           onClick={e => e.stopPropagation()}
+                           className="text-xs text-blue-500 hover:underline flex items-center gap-0.5">
+                          <ExternalLink className="h-3 w-3" /> datasheet
+                        </a>
+                      )}
+                      {selections[part.part_number] === i && (
+                        <CheckCircle className="h-4 w-4 text-blue-500" />
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="shrink-0 px-8 py-4 border-t bg-white">
+        <button
+          onClick={handleConfirm}
+          disabled={saving}
+          className="w-full rounded-xl bg-blue-600 py-3 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><CheckCircle className="h-4 w-4" /> Confirm Selections</>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Phase 3: Classify (fundamental / auxiliary) ────────────────────────────────
+
+function ClassifyPhase({ initialParts, onComplete }: {
+  initialParts: PartDetail[];
+  onComplete: (components: Component[]) => void;
+}) {
+  const { sessionId, setCurrentStage } = useSession();
+
+  const toComponent = (p: PartDetail, index: number): Component => ({
+    id: `comp-${p.part_number}-${index}`,
+    reference: p.part_number,
+    partNumber: p.part_number,
+    manufacturer: p.manufacturer ?? undefined,
+    description: p.description || p.part_number,
+    type: p.category || 'IC',
+    isFundamental: p.classification == null ? undefined : p.classification === 'non-auxiliary',
+    isIdentified: p.confidence >= 0.8,
+    isGeneric: false,
+    complianceStatus: 'unknown' as const,
+    specs: {
+      category: p.category,
+      source: p.source,
+      confidence: p.confidence,
+      needs_review: p.needs_review,
+      datasheet_url: p.datasheet_url,
+      candidates: p.candidates,
+    },
+  });
+
+  const [localComponents, setLocalComponents] = useState<Component[]>(() =>
+    initialParts.map(toComponent)
+  );
+  const [partDetailMap] = useState<Record<string, PartDetail>>(() => {
+    const m: Record<string, PartDetail> = {};
+    initialParts.forEach(p => { m[p.part_number] = p; });
+    return m;
+  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isApplying, setIsApplying] = useState(false);
+  const originalRef = useRef<Record<string, 'auxiliary' | 'non-auxiliary' | null>>({});
+
+  useEffect(() => {
+    initialParts.forEach(p => {
+      originalRef.current[p.part_number] = p.classification ?? null;
+    });
+  }, []);
+
+  const fundamentalComponents = localComponents.filter(c => c.isFundamental === true);
+  const auxiliaryComponents = localComponents.filter(c => c.isFundamental === false);
+  const unclassified = localComponents.filter(c => c.isFundamental === undefined);
+
+  const filterComps = (comps: Component[]) => {
+    if (!searchQuery.trim()) return comps;
+    const q = searchQuery.toLowerCase();
+    return comps.filter(c =>
+      (c.partNumber || '').toLowerCase().includes(q) ||
+      (c.description || '').toLowerCase().includes(q) ||
+      (c.type || '').toLowerCase().includes(q)
+    );
+  };
+
+  const handleMove = (id: string, isFundamental: boolean) => {
+    setLocalComponents(prev => prev.map(c => c.id === id ? { ...c, isFundamental } : c));
+  };
+
+  const getPendingChanges = () =>
+    localComponents.flatMap(c => {
+      if (!c.partNumber) return [];
+      const orig = originalRef.current[c.partNumber];
+      const curr: 'auxiliary' | 'non-auxiliary' | null = c.isFundamental === true ? 'non-auxiliary' : c.isFundamental === false ? 'auxiliary' : null;
+      if (curr !== null && curr !== orig) return [{ mpn: c.partNumber, new_classification: curr }];
+      return [];
+    });
+
+  const handleApply = async () => {
+    if (!sessionId) return;
+    const changes = getPendingChanges();
+    if (changes.length === 0) { onComplete(localComponents); return; }
+    setIsApplying(true);
+    try {
+      await bulkUpdateClassification(sessionId, changes, setCurrentStage);
+      changes.forEach(ch => { originalRef.current[ch.mpn] = ch.new_classification; });
+      toast.success(`Applied ${changes.length} change${changes.length !== 1 ? 's' : ''}`);
+      onComplete(localComponents);
+    } catch (e: any) {
+      toast.error(e.message);
     } finally {
       setIsApplying(false);
     }
   };
 
-  const handleProceed = () => {
-    // Go to next stage without applying changes (when no changes exist)
-    onClassificationComplete(localComponents);
-  };
+  const PartCard = ({ comp, side }: { comp: Component; side: 'fund' | 'aux' }) => {
+    const detail = comp.partNumber ? partDetailMap[comp.partNumber] : null;
+    const [expanded, setExpanded] = useState(false);
+    const hasCandidates = (detail?.candidates?.length ?? 0) > 1;
 
-  const fundamentalComponents = localComponents.filter((c) => c.isFundamental === true);
-  const auxiliaryComponents = localComponents.filter((c) => c.isFundamental === false);
-  const unclassifiedComponents = localComponents.filter((c) => c.isFundamental === undefined);
-
-  const allClassified = unclassifiedComponents.length === 0;
-  const pendingChanges = getPendingChanges();
-  const hasPendingChanges = pendingChanges.length > 0;
-  const dataFromGet = dataFromGetRef.current;
-
-  // Filter components based on search query
-  const filterComponents = (components: Component[]) => {
-    if (!searchQuery.trim()) return components;
-    
-    const query = searchQuery.toLowerCase();
-    return components.filter((comp) => {
-      const reference = (comp.reference || '').toLowerCase();
-      const partNumber = (comp.partNumber || '').toLowerCase();
-      const description = (comp.description || '').toLowerCase();
-      const type = (comp.type || '').toLowerCase();
-      
-      return (
-        reference.includes(query) ||
-        partNumber.includes(query) ||
-        description.includes(query) ||
-        type.includes(query)
-      );
-    });
-  };
-
-  const filteredFundamental = filterComponents(fundamentalComponents);
-  const filteredAuxiliary = filterComponents(auxiliaryComponents);
-
-  // Show centered loader when classifying (like upload page)
-  if (isClassifying) {
     return (
-      <div className="h-full flex items-center justify-center p-8">
-        <div className="w-full max-w-2xl">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-6"
-          >
-            <div className="rounded-xl border border-gray-300 bg-gray-50 p-12 text-center transition-all">
-              <div className="space-y-4">
-                <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto" />
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                  Processing Classification...
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  Classifying {currentClassifying} of {classificationStats?.total_parts || '...'} parts
-                </p>
-                {classificationStats && (
-                  <div className="w-full max-w-md mx-auto">
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden mb-2">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${classifyProgress}%` }}
-                        transition={{ duration: 0.3 }}
-                        className="h-full bg-blue-500"
-                      />
-                    </div>
-                    <p className="text-sm text-gray-500">
-                      {Math.round(classifyProgress)}% complete
-                    </p>
-                  </div>
-                )}
-              </div>
+      <motion.div
+        layout
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.96 }}
+        className={`rounded-lg border p-2.5 bg-white transition-all group cursor-pointer ${
+          side === 'fund' ? 'border-blue-200 hover:border-blue-400' : 'border-gray-200 hover:border-gray-400'
+        }`}
+        onClick={() => handleMove(comp.id, side === 'aux')}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`font-mono text-xs font-semibold ${side === 'fund' ? 'text-blue-800' : 'text-gray-700'}`}>
+                {comp.partNumber}
+              </span>
+              {detail && srcBadge(detail.source)}
+              {hasCandidates && (
+                <button
+                  onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+                  className="text-[10px] text-yellow-600 bg-yellow-50 border border-yellow-200 px-1.5 py-0.5 rounded-full flex items-center gap-0.5 hover:bg-yellow-100"
+                >
+                  {detail!.candidates.length} matches <ChevronDown className={`h-2.5 w-2.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                </button>
+              )}
             </div>
-          </motion.div>
+            {detail?.category && <div className="text-[11px] text-gray-500 mt-0.5 truncate">{detail.category}</div>}
+            {detail?.description && detail.description !== comp.partNumber && (
+              <div className="text-[11px] text-gray-400 truncate">{detail.description}</div>
+            )}
+            {detail?.needs_review && (
+              <span className="text-[10px] text-yellow-600 bg-yellow-50 border border-yellow-200 px-1.5 py-0.5 rounded mt-0.5 inline-block">
+                needs review
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] text-gray-300 group-hover:text-gray-500 shrink-0 mt-0.5">
+            {side === 'fund' ? '→ aux' : '→ fund'}
+          </span>
         </div>
+
+        {/* Candidate list (expandable) */}
+        {expanded && hasCandidates && (
+          <div className="mt-2 pt-2 border-t border-gray-100 space-y-1" onClick={e => e.stopPropagation()}>
+            {detail!.candidates.map((c, i) => (
+              <div key={c.mpn} className={`text-[11px] rounded px-2 py-1 ${i === 0 ? 'bg-blue-50 text-blue-800' : 'text-gray-600'}`}>
+                <span className="font-mono font-medium">{c.mpn}</span>
+                {c.category && <span className="text-gray-500 ml-1">· {c.category}</span>}
+                {c.is_exact_match && <span className="ml-1 text-green-600">✓ exact</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.div>
+    );
+  };
+
+  const pending = getPendingChanges();
+
+  return (
+    <div className="h-full flex flex-col bg-gray-50">
+      {/* Header */}
+      <div className="shrink-0 px-6 py-3 bg-white border-b flex items-center gap-4">
+        <div className="flex gap-4 text-sm">
+          <span className="text-blue-600 font-semibold">{fundamentalComponents.length} fundamental</span>
+          <span className="text-gray-500">{auxiliaryComponents.length} auxiliary</span>
+          {unclassified.length > 0 && <span className="text-yellow-600">{unclassified.length} unclassified</span>}
+        </div>
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search parts…"
+            className="w-full pl-8 pr-8 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2">
+              <X className="h-3 w-3 text-gray-400" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Two-pane */}
+      <div className="flex-1 overflow-hidden flex gap-0">
+        {/* Fundamental */}
+        <div className="flex-1 flex flex-col border-r overflow-hidden">
+          <div className="shrink-0 px-4 py-2 bg-blue-50 border-b border-blue-100 flex items-center gap-2">
+            <Cpu className="h-4 w-4 text-blue-600" />
+            <span className="font-semibold text-sm text-blue-900">Fundamental</span>
+            <span className="ml-auto text-blue-600 font-bold text-sm">{fundamentalComponents.length}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {filterComps(fundamentalComponents).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-sm">
+                <Cpu className="h-8 w-8 mb-2 text-gray-300" />
+                Click auxiliary parts to move here
+              </div>
+            ) : (
+              filterComps(fundamentalComponents).map(comp => (
+                <PartCard key={comp.id} comp={comp} side="fund" />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Auxiliary */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="shrink-0 px-4 py-2 bg-gray-100 border-b border-gray-200 flex items-center gap-2">
+            <Zap className="h-4 w-4 text-gray-500" />
+            <span className="font-semibold text-sm text-gray-700">Auxiliary</span>
+            <span className="ml-auto text-gray-600 font-bold text-sm">{auxiliaryComponents.length}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {filterComps(auxiliaryComponents).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-sm">
+                <Zap className="h-8 w-8 mb-2 text-gray-300" />
+                Click fundamental parts to move here
+              </div>
+            ) : (
+              filterComps(auxiliaryComponents).map(comp => (
+                <PartCard key={comp.id} comp={comp} side="aux" />
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="shrink-0 px-6 py-3 border-t bg-white">
+        {unclassified.length > 0 ? (
+          <button disabled className="w-full rounded-lg bg-gray-200 py-2 text-gray-500 text-sm font-medium cursor-not-allowed flex items-center justify-center gap-2">
+            <AlertCircle className="h-4 w-4" />
+            Classify {unclassified.length} remaining part{unclassified.length !== 1 ? 's' : ''} first
+          </button>
+        ) : pending.length > 0 ? (
+          <div className="flex gap-3">
+            <button
+              onClick={() => setLocalComponents(prev => prev.map(c => {
+                const orig = c.partNumber ? originalRef.current[c.partNumber] : null;
+                return { ...c, isFundamental: orig === null ? undefined : orig === 'non-auxiliary' };
+              }))}
+              disabled={isApplying}
+              className="flex-1 rounded-lg bg-gray-100 py-2 text-gray-700 text-sm font-medium hover:bg-gray-200 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Reset
+            </button>
+            <button
+              onClick={handleApply}
+              disabled={isApplying}
+              className="flex-2 flex-[2] rounded-lg bg-blue-600 py-2 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isApplying ? <><Loader2 className="h-4 w-4 animate-spin" /> Applying…</> : <><CheckCircle className="h-4 w-4" /> Apply {pending.length} change{pending.length !== 1 ? 's' : ''}</>}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => onComplete(localComponents)}
+            className="w-full rounded-lg bg-green-600 py-2 text-white text-sm font-semibold hover:bg-green-700 flex items-center justify-center gap-2"
+          >
+            Proceed to Validation <ArrowRight className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
+
+export function FundamentalClassificationView({
+  components: _components,
+  onClassificationComplete,
+}: FundamentalClassificationViewProps) {
+  const { sessionId, setCurrentStage, refreshTrigger } = useSession();
+  const [phase, setPhase] = useState<Phase>('research');
+  const [enrichedParts, setEnrichedParts] = useState<PartDetail[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  // If session already has classification data (navigating back), skip research
+  useEffect(() => {
+    if (!sessionId) return;
+    // Check if classification already done by fetching GET endpoint
+    getClassification(sessionId)
+      .then(result => {
+        const allNull = Object.values(result.classification_map).every(v => v === null);
+        if (!allNull && result.parts?.length) {
+          // Already classified — jump to classify phase
+          setEnrichedParts(result.parts);
+          setPhase('classify');
+        }
+        // Otherwise stay on research phase (will run stream)
+      })
+      .catch(() => {
+        // 404 or error — start fresh with research
+      });
+  }, [sessionId, refreshTrigger]);
+
+  if (!sessionId) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <p className="text-gray-500">No session. Please upload a BOM first.</p>
       </div>
     );
   }
 
+  if (phase === 'research') {
+    return (
+      <ResearchPhase
+        sessionId={sessionId}
+        setCurrentStage={setCurrentStage}
+        onComplete={parts => {
+          setEnrichedParts(parts);
+          // Check if any parts need selection
+          const needsSel = parts.some(p => (p.candidates?.length ?? 0) > 1 && !p.candidates?.[0]?.is_exact_match);
+          setPhase(needsSel ? 'selection' : 'classify');
+        }}
+      />
+    );
+  }
+
+  if (phase === 'selection') {
+    return (
+      <SelectionPhase
+        parts={enrichedParts}
+        onComplete={updated => {
+          setEnrichedParts(updated);
+          setPhase('classify');
+        }}
+      />
+    );
+  }
+
   return (
-    <div className="h-full overflow-y-auto p-8">
-      <div className="w-full max-w-6xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-8"
-        >
-          {/* <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            Component Classification
-          </h1>
-          <p className="text-lg text-gray-600">
-            Classify components as <strong>Fundamental (Essential)</strong> or{' '}
-            <strong>Auxiliary (Non-Essential)</strong>
-          </p> */}
-        </motion.div>
-
-        {/* Error State */}
-        {error && !isClassifying && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl border border-gray-300 bg-white p-12 mb-8"
-          >
-            <div className="flex flex-col items-center justify-center space-y-4">
-              <AlertCircle className="h-16 w-16 text-gray-400" />
-              <div className="text-center">
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                  Unable to Load Classification
-                </h3>
-                <p className="text-lg text-gray-600 mb-4">
-                  {error}
-                </p>
-                <p className="text-sm text-gray-500">
-                  Please make sure you have uploaded a BOM file and try again.
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Show content only after classification is complete */}
-        {!isClassifying && !error && localComponents.length > 0 && (
-          <>
-            {/* Summary Cards */}
-            <div className="grid grid-cols-3 gap-4 mb-8">
-              <div className="rounded-lg border border-blue-300 bg-blue-50 p-6 text-center">
-                <div className="text-4xl font-bold text-blue-600">
-                  {classificationStats?.non_auxiliary_parts ?? fundamentalComponents.length}
-                </div>
-                <div className="text-sm text-gray-700 mt-1">Fundamental (Non-Auxiliary)</div>
-                {classificationStats && (
-                  <div className="text-xs text-gray-600 mt-1">
-                    {classificationStats.total_parts} total parts
-                  </div>
-                )}
-              </div>
-              <div className="rounded-lg border border-gray-300 bg-gray-50 p-6 text-center">
-                <div className="text-4xl font-bold text-gray-700">
-                  {classificationStats?.auxiliary_parts ?? auxiliaryComponents.length}
-                </div>
-                <div className="text-sm text-gray-700 mt-1">Auxiliary</div>
-                {classificationStats && (
-                  <div className="text-xs text-gray-600 mt-1">
-                    {Math.round((classificationStats.auxiliary_parts / classificationStats.total_parts) * 100)}% of total
-                  </div>
-                )}
-              </div>
-              <div className="rounded-lg border border-gray-300 bg-white p-6 text-center">
-                <div className="text-4xl font-bold text-gray-900">
-                  {unclassifiedComponents.length}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">Unclassified</div>
-                {classificationStats && unclassifiedComponents.length === 0 && (
-                  <div className="text-xs text-green-600 mt-1 font-medium">
-                    All classified ✓
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Component List */}
-            <div className="rounded-xl border border-gray-300 bg-white p-6 mb-6">
-              {/* Search Bar */}
-              <div className="mb-4">
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search components by reference, part number, type, or description..."
-                    className="w-full pl-12 pr-12 py-3 rounded-lg border border-gray-300 focus:border-blue-400 focus:outline-none text-sm transition-colors"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  )}
-                </div>
-                {searchQuery && (
-                  <div className="mt-2 text-xs text-gray-600">
-                    Showing {filteredFundamental.length + filteredAuxiliary.length} of {fundamentalComponents.length + auxiliaryComponents.length} components
-                  </div>
-                )}
-              </div>
-
-              {/* Status Messages */}
-              {allClassified && (
-                <div className="mb-4 space-y-2">
-                  <div className="flex items-center gap-2 text-xs text-green-700">
-                    <CheckCircle className="h-3 w-3 text-green-600" />
-                    <span>
-                      <strong>All Set!</strong> AI has classified all {localComponents.length} components. Review below if needed, or proceed directly to System Architecture.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-green-700">
-                    <CheckCircle className="h-3 w-3 text-green-600" />
-                    <span>
-                      <strong>Classification Complete!</strong> {fundamentalComponents.length} fundamental components will be used for system architecture. {auxiliaryComponents.length} auxiliary components will be tracked separately.
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Two-Pane Layout */}
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                {/* Left Pane: Fundamental Components */}
-                <div className="rounded-lg border border-blue-300 bg-blue-50 p-3">
-                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-blue-300">
-                    <div className="flex items-center gap-2">
-                      <Cpu className="h-4 w-4 text-blue-600" />
-                      <h4 className="font-semibold text-gray-900">Fundamental</h4>
-                    </div>
-                    <div className="text-lg font-bold text-blue-600">
-                      {fundamentalComponents.length}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
-                    {filteredFundamental.length === 0 ? (
-                      <div className="text-center py-12 text-gray-500">
-                        <Cpu className="h-12 w-12 mx-auto mb-2 text-gray-400" />
-                        <p className="text-sm">No fundamental components</p>
-                        <p className="text-xs">Click items on the right to move here</p>
-                      </div>
-                    ) : (
-                      filteredFundamental.map((comp) => {
-                        return (
-                          <motion.div
-                            key={comp.id}
-                            layout
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
-                            onClick={() => handleClassify(comp.id, false)}
-                            className="bg-white border border-blue-300 rounded p-2 transition-all group cursor-pointer hover:border-blue-500"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              {comp.partNumber && (
-                                <span className="text-sm text-blue-700 font-mono bg-blue-50 border border-blue-300 px-2 py-1 rounded font-medium">
-                                  {comp.partNumber}
-                                </span>
-                              )}
-                              <span className="text-xs text-gray-500 group-hover:text-blue-600">Move →</span>
-                            </div>
-                          </motion.div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                {/* Right Pane: Auxiliary Components */}
-                <div className="rounded-lg border border-gray-300 bg-gray-50 p-3">
-                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-300">
-                    <div className="flex items-center gap-2">
-                      <Zap className="h-4 w-4 text-gray-600" />
-                      <h4 className="font-semibold text-gray-900">Auxiliary</h4>
-                    </div>
-                    <div className="text-lg font-bold text-gray-700">
-                      {auxiliaryComponents.length}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
-                    {filteredAuxiliary.length === 0 ? (
-                      <div className="text-center py-12 text-gray-500">
-                        <Zap className="h-12 w-12 mx-auto mb-2 text-gray-400" />
-                        <p className="text-sm">No auxiliary components</p>
-                        <p className="text-xs">Click items on the left to move here</p>
-                      </div>
-                    ) : (
-                      filteredAuxiliary.map((comp) => {
-                        return (
-                          <motion.div
-                            key={comp.id}
-                            layout
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
-                            onClick={() => handleClassify(comp.id, true)}
-                            className="bg-white border border-gray-300 rounded p-2 transition-all group cursor-pointer hover:border-gray-400"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs text-gray-500 group-hover:text-gray-700">← Move</span>
-                              {comp.partNumber && (
-                                <span className="text-sm text-gray-700 font-mono bg-gray-50 border border-gray-300 px-2 py-1 rounded font-medium">
-                                  {comp.partNumber}
-                                </span>
-                              )}
-                            </div>
-                          </motion.div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              {!allClassified ? (
-                <button
-                  disabled
-                  className="w-full rounded-lg bg-gray-300 px-4 py-2 text-gray-600 font-medium text-sm cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-                >
-                  <AlertCircle className="h-4 w-4" />
-                  Classify {unclassifiedComponents.length} component(s) first
-                </button>
-              ) : hasPendingChanges ? (
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleResetChanges}
-                    disabled={isApplying}
-                    className="flex-1 rounded-lg bg-gray-200 px-4 py-2 text-gray-700 font-medium text-sm hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Reset Changes
-                  </button>
-                  <button
-                    onClick={handleApplyClassification}
-                    disabled={isApplying}
-                    className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-white font-medium text-sm hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-                  >
-                    {isApplying ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Applying {pendingChanges.length} change(s)...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="h-4 w-4" />
-                        Apply Classification ({pendingChanges.length} change{pendingChanges.length !== 1 ? 's' : ''})
-                      </>
-                    )}
-                  </button>
-                </div>
-              ) : dataFromGet ? (
-                <button
-                  onClick={handleProceed}
-                  className="w-full rounded-lg bg-green-600 px-4 py-2 text-white font-medium text-sm hover:bg-green-700 flex items-center justify-center gap-2 transition-all"
-                >
-                  <span>Go to Next Stage</span>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              ) : (
-                <button
-                  onClick={handleProceed}
-                  className="w-full rounded-lg bg-blue-600 px-4 py-2 text-white font-medium text-sm hover:bg-blue-700 flex items-center justify-center gap-2 transition-all"
-                >
-                  <CheckCircle className="h-4 w-4" />
-                  Proceed to Next Stage
-                </button>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+    <ClassifyPhase
+      initialParts={enrichedParts}
+      onComplete={onClassificationComplete}
+    />
   );
 }

@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Cpu, ArrowLeft, Command } from 'lucide-react';
+import { ChatPanel } from '@/app/shared/components/ChatPanel';
 import { Button } from '@/app/shared/components/ui/button';
 import { StageIndicator } from '@/app/shared/components/StageIndicator';
 import { useState, useEffect } from 'react';
@@ -27,8 +28,8 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
       '/upload': 'upload',
       // '/discovery': 'discovery', // Commented out
      
-      '/fundamental': 'fundamental',
-      '/analysis': 'analysis',
+      '/part-identification': 'part-identification',
+      '/system-identification': 'system-identification',
        '/validate': 'validate', // Commented out
       '/architecture': 'architecture',
       '/requirements': 'requirements',
@@ -87,8 +88,8 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
       upload: '/upload',
       // discovery: '/discovery', // Commented out
   
-      fundamental: '/fundamental',
-      analysis: '/analysis',
+      'part-identification': '/part-identification',
+      'system-identification': '/system-identification',
        validate: '/validate', // Commented out
       architecture: '/architecture',
       requirements: '/requirements',
@@ -147,8 +148,8 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
                 upload: '/upload',
                 // discovery: '/discovery', // Commented out
                
-                fundamental: '/fundamental',
-                analysis: '/analysis',
+                'part-identification': '/part-identification',
+                'system-identification': '/system-identification',
                  validate: '/validate', // Commented out
                 architecture: '/architecture',
                 requirements: '/requirements',
@@ -172,6 +173,9 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
         onClose={() => setCommandPaletteOpen(false)}
         onCommand={handleCommand}
       />
+
+      {/* Hide floating chat on /system-identification — that page has its own embedded chat */}
+      {location.pathname !== '/system-identification' && <ChatPanel />}
     </div>
   );
 }

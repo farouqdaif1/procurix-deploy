@@ -220,8 +220,8 @@ Try asking questions like "What's my compliance score?" or "Tell me about my com
       status: 'complete',
     },
     {
-      id: 'fundamental',
-      title: 'Fundamental Classification',
+      id: 'part-identification',
+      title: 'Part Identification',
       description: 'Components classified as fundamental or auxiliary',
       icon: Layers,
       available: true,

@@ -21,7 +21,7 @@ interface RequirementsViewProps {
 }
 
 export function RequirementsView({ onRequirementsComplete }: RequirementsViewProps) {
-  const { sessionId, setCurrentStage } = useSession();
+  const { sessionId, setCurrentStage, refreshTrigger } = useSession();
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [isGenerating, setIsGenerating] = useState(true);
   const [, setError] = useState<string | null>(null);
@@ -103,7 +103,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
     };
 
     fetchRequirements();
-  }, [sessionId]);
+  }, [sessionId, refreshTrigger]);
 
   const handleEdit = (reqId: string) => {
     setRequirements(prev =>

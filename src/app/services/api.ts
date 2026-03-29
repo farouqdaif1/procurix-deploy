@@ -1,4 +1,4 @@
-const BASE_URL = 'https://designevolution-production.up.railway.app/api';
+const BASE_URL = 'http://localhost:8000/api';
 
 export interface CreateSessionResponse {
     session_id: string;
@@ -70,12 +70,37 @@ export async function uploadBOM(
     return result;
 }
 
+export interface PartCandidate {
+    mpn: string;
+    manufacturer: string | null;
+    category: string | null;
+    description: string | null;
+    datasheet_url: string | null;
+    is_exact_match: boolean;
+    confidence: number;
+}
+
+export interface PartDetail {
+    part_number: string;
+    manufacturer: string | null;
+    quantity: number | null;
+    classification: 'auxiliary' | 'non-auxiliary' | null;
+    category: string | null;
+    description: string | null;
+    source: 'nexar' | 'tavily' | 'combined' | 'unknown' | 'nexar_confirmed' | null;
+    confidence: number;
+    needs_review: boolean;
+    datasheet_url: string | null;
+    candidates: PartCandidate[];
+}
+
 export interface ClassifyPartsResponse {
     success: boolean;
     total_parts: number;
     auxiliary_parts: number;
     non_auxiliary_parts: number;
     classification_map: Record<string, 'auxiliary' | 'non-auxiliary' | null>;
+    parts?: PartDetail[];
 }
 
 export async function classifyParts(
@@ -104,6 +129,86 @@ export async function classifyParts(
     }
 
     return result;
+}
+
+// SSE streaming classify — calls /classify/stream and yields parsed events
+export type ClassifyStreamEvent =
+  | { type: 'start'; total: number; message: string }
+  | { type: 'searching'; mpn: string; message: string }
+  | { type: 'cached'; mpn: string; category: string | null; description: string | null; source: string; candidates: PartCandidate[] }
+  | { type: 'found'; mpn: string; category: string | null; description: string | null; source: string; is_exact_match: boolean; candidates: PartCandidate[] }
+  | { type: 'not_found'; mpn: string; message: string }
+  | { type: 'classifying'; message: string }
+  | { type: 'complete'; result: ClassifyPartsResponse }
+  | { type: 'error'; message: string };
+
+export async function classifyPartsStream(
+    sessionId: string,
+    onEvent: (event: ClassifyStreamEvent) => void,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<ClassifyPartsResponse | null> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/classify/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Classify stream failed: ${response.status} ${text}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult: ClassifyPartsResponse | null = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+                const event: ClassifyStreamEvent = JSON.parse(line.slice(6));
+                onEvent(event);
+                if (event.type === 'complete') {
+                    finalResult = event.result;
+                    if (setCurrentStage) {
+                        updateCurrentStageInContext(sessionId, setCurrentStage).catch(() => {});
+                    }
+                }
+            } catch {
+                // ignore malformed events
+            }
+        }
+    }
+
+    return finalResult;
+}
+
+export async function selectPartMatch(
+    sessionId: string,
+    mpn: string,
+    candidate: PartCandidate
+): Promise<void> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/select-part-match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            mpn,
+            selected_mpn: candidate.mpn,
+            selected_manufacturer: candidate.manufacturer,
+            selected_category: candidate.category,
+            selected_description: candidate.description,
+            selected_datasheet_url: candidate.datasheet_url,
+        }),
+    });
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`selectPartMatch failed: ${response.status} ${text}`);
+    }
 }
 
 export interface UpdateClassificationResponse {
@@ -632,26 +737,17 @@ export async function getSystemAnalysis(sessionId: string): Promise<SystemAnalys
         },
     });
 
+    // 404 means analysis hasn't run yet — return empty rather than throwing
+    if (response.status === 404) {
+        return { success: false, session_id: sessionId, suggestions: [] };
+    }
+
     if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to get system analysis: ${response.status} ${errorText}`);
     }
 
-    const data: GetSystemAnalysisResponse = await response.json();
-
-    // Transform GET response to match POST response format
-    return {
-        success: data.success,
-        session_id: sessionId,
-        suggestions: [{
-            systemType: data.system_analysis.system_type,
-            primaryFunction: data.system_analysis.primary_function,
-            keyArchitecturalClues: data.system_analysis.architectural_clues,
-            likelyApplicationDomains: data.system_analysis.application_domains,
-            confidence: 'high' as const, // Default to high since it's the selected analysis
-            reasoning: `System identified as ${data.system_analysis.system_type} based on architectural clues: ${data.system_analysis.architectural_clues.join(', ')}`,
-        }],
-    };
+    return response.json();
 }
 
 export async function getValidationResults(sessionId: string): Promise<ValidateResponse> {
@@ -896,6 +992,31 @@ export async function createSubsystemRequirement(
         throw new Error(`Failed to create subsystem requirement: ${response.status} ${errorText}`);
     }
 
+    return response.json();
+}
+
+// ── Chat ─────────────────────────────────────────────────────────────────────
+
+export interface ChatResponse {
+    agent: string;
+    mode: string;
+    data: string;
+    state: string;
+    session_id: string;
+    timestamp: string;
+    elapsed_ms: number;
+}
+
+export async function sendChatMessage(sessionId: string, message: string): Promise<ChatResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Chat failed: ${response.status} ${errorText}`);
+    }
     return response.json();
 }
 

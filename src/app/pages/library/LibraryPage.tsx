@@ -17,7 +17,7 @@ const mapStageNumberToStage = (stageNumber: number): SessionStage => {
   if (stageNumber >= 5) return 'requirements'; // Stage 5: Requirements
   if (stageNumber >= 4) return 'validate'; // Stage 4: Validation
   if (stageNumber >= 3) return 'analysis'; // Stage 3: System Analysis
-  if (stageNumber >= 2) return 'fundamental'; // Stage 2: Classification
+  if (stageNumber >= 2) return 'part-identification'; // Stage 2: Part Identification
   return 'upload'; // Stage 1: Upload & Parse
 };
 

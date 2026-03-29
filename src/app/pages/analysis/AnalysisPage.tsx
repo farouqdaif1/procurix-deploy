@@ -28,9 +28,9 @@ export function AnalysisPage() {
     const activeSessionId = contextSessionId || querySessionId;
     toast.success(`System type selected: ${systemType}`);
     if (activeSessionId) {
-      navigate(`/validate?session=${activeSessionId}`);
+      navigate(`/part-identification?session=${activeSessionId}`);
     } else {
-      navigate('/validate');
+      navigate('/part-identification');
     }
   };
 

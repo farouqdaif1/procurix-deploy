@@ -33,9 +33,9 @@ export function FundamentalPage() {
     
     toast.success(`Classification complete! ${fundamentalCount} fundamental, ${auxiliaryCount} auxiliary`);
     if (activeSessionId) {
-      navigate(`/analysis?session=${activeSessionId}`);
+      navigate(`/validate?session=${activeSessionId}`);
     } else {
-      navigate('/analysis');
+      navigate('/validate');
     }
   };
 

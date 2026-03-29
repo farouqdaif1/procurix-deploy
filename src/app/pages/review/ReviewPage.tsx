@@ -15,7 +15,7 @@ export function ReviewPage() {
     const stageRoutes: Record<string, string> = {
       discovery: '/discovery',
       identify: '/identify',
-      fundamental: '/fundamental',
+      'part-identification': '/part-identification',
       architecture: '/architecture',
       requirements: '/requirements',
       subsystems: '/subsystems',

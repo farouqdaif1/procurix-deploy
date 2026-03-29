@@ -1,393 +1,331 @@
-import { useState, useEffect } from 'react';
-import { Loader2, Sparkles, CheckCircle, AlertCircle, Info, Zap } from 'lucide-react';
-import { motion } from 'motion/react';
+import { useState, useEffect, useRef } from 'react';
+import { CheckCircle, Zap, Loader2, Info } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { analyzeSystem, getSystemAnalysis, selectSystemType, type SystemSuggestion } from '@/app/services/api';
+import { sendChatMessage, getSystemAnalysis, selectSystemType, type SystemSuggestion } from '@/app/services/api';
+
+interface Line {
+  id: string;
+  type: 'input' | 'output' | 'system' | 'error';
+  content: string;
+}
 
 interface AnalysisViewProps {
   onSystemTypeSelected: (systemType: string) => void;
 }
 
+const CONFIDENCE_STYLES: Record<string, string> = {
+  high:   'bg-green-50 border-green-200 text-green-700',
+  medium: 'bg-blue-50  border-blue-200  text-blue-700',
+  low:    'bg-gray-50  border-gray-200  text-gray-600',
+};
+
 export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
-  const { sessionId, setCurrentStage } = useSession();
-  const [isAnalyzing, setIsAnalyzing] = useState(true);
-  const [hasGenerated, setHasGenerated] = useState(false);
+  const { sessionId, currentStage, triggerRefresh } = useSession();
+
+  const [lines, setLines]             = useState<Line[]>([]);
+  const [input, setInput]             = useState('');
+  const [loading, setLoading]         = useState(false);
   const [suggestions, setSuggestions] = useState<SystemSuggestion[]>([]);
-  const [selectedSuggestion, setSelectedSuggestion] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [additionalContext, setAdditionalContext] = useState('');
+  const [selected, setSelected]       = useState<number | null>(null);
+  const [confirming, setConfirming]   = useState(false);
 
-  // Fetch system analysis on mount
+  // useRef so React StrictMode double-mount doesn't fire init twice
+  const initiatedRef = useRef(false);
+  const bottomRef    = useRef<HTMLDivElement>(null);
+  const inputRef     = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
-    const fetchAnalysis = async () => {
-      if (!sessionId) {
-        setError('No session found. Please upload a BOM first.');
-        setIsAnalyzing(false);
-        return;
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [lines, loading]);
+
+  useEffect(() => {
+    if (!sessionId || initiatedRef.current) return;
+    initiatedRef.current = true;
+
+    const init = async () => {
+      // Only fetch existing analysis if we know it has run (stage >= 2 = analyzed)
+      // Stage 1 = bom_uploaded — skip the GET, go straight to trigger
+      if (currentStage !== null && currentStage >= 2) {
+        const existing = await getSystemAnalysis(sessionId);
+        if (existing.success && existing.suggestions?.length) {
+          setSuggestions(existing.suggestions);
+          const top = existing.suggestions[0];
+          pushSystem(
+            top?.confidence === 'high'
+              ? `${top.systemType} — select from the options on the right or type to refine.`
+              : `${existing.suggestions.length} options identified — review on the right or type to refine.`
+          );
+          return;
+        }
       }
 
-      setIsAnalyzing(true);
-      setError(null);
-
-      try {
-        // Try GET first, fallback to POST if 404
-        let result;
-        try {
-          result = await getSystemAnalysis(sessionId);
-          console.log('Got system analysis from GET endpoint');
-        } catch (getError: any) {
-          // If 404, try POST to generate analysis
-          if (getError.message?.includes('404') || getError.message?.includes('Failed to get system analysis: 404')) {
-            console.log('System analysis not found, generating...');
-            result = await analyzeSystem(sessionId, additionalContext || undefined, setCurrentStage);
-            console.log('Generated system analysis from POST endpoint');
-          } else {
-            throw getError;
-          }
-        }
-        
-        if (!result.success) {
-          throw new Error('Analysis request was not successful');
-        }
-
-        setSuggestions(result.suggestions);
-        setIsAnalyzing(false);
-        setHasGenerated(true);
-        toast.success(`Analysis complete! Found ${result.suggestions.length} system type suggestions`);
-      } catch (error) {
-        setIsAnalyzing(false);
-        const errorMessage = error instanceof Error ? error.message : 'Failed to analyze system';
-        setError(errorMessage);
-        toast.error(errorMessage);
-      }
+      await sendTrigger();
     };
 
-    fetchAnalysis();
+    init();
   }, [sessionId]);
 
-  const handleGenerate = async () => {
-    if (!sessionId) {
-      setError('No session found. Please upload a BOM first.');
-      return;
-    }
+  const pushLine = (type: Line['type'], content: string) => {
+    setLines(prev => [...prev, { id: `${Date.now()}_${Math.random()}_${type}`, type, content }]);
+  };
+  const pushSystem = (content: string) => pushLine('system', content);
+  const pushOutput = (content: string) => pushLine('output', content);
+  const pushError  = (content: string) => pushLine('error', content);
 
-    setIsAnalyzing(true);
-    setError(null);
+  const sendTrigger = async () => {
+    if (!sessionId) return;
+    setLoading(true);
+    try {
+      const res = await sendChatMessage(sessionId, '__begin_system_identification__');
+      pushOutput(res.data);
+      await refreshSuggestions();
+    } catch {
+      pushError('Failed to start analysis. Please refresh.');
+    } finally {
+      setLoading(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  const refreshSuggestions = async () => {
+    if (!sessionId) return;
+    try {
+      const res = await getSystemAnalysis(sessionId);
+      if (res.success && res.suggestions?.length) {
+        setSuggestions(res.suggestions);
+        triggerRefresh();
+      }
+    } catch (_) {}
+  };
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading || !sessionId) return;
+
+    pushLine('input', text);
+    setInput('');
+    setLoading(true);
 
     try {
-      const result = await analyzeSystem(sessionId, additionalContext || undefined, setCurrentStage);
-      
-      if (!result.success) {
-        throw new Error('Analysis request was not successful');
-      }
-
-      setSuggestions(result.suggestions);
-      setIsAnalyzing(false);
-      setHasGenerated(true);
-      toast.success(`Analysis complete! Found ${result.suggestions.length} system type suggestions`);
-    } catch (error) {
-      setIsAnalyzing(false);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to analyze system';
-      setError(errorMessage);
-      toast.error(errorMessage);
+      const res = await sendChatMessage(sessionId, text);
+      pushOutput(res.data);
+      await refreshSuggestions();
+    } catch (err: any) {
+      pushError(`Error: ${err.message}`);
+    } finally {
+      setLoading(false);
+      inputRef.current?.focus();
     }
   };
 
-  const handleSelectSuggestion = (index: number) => {
-    setSelectedSuggestion(index);
-  };
-
-  const handleProceed = async () => {
-    if (selectedSuggestion !== null && sessionId) {
-      try {
-        // Call API to select the system type
-        await selectSystemType(sessionId, selectedSuggestion, setCurrentStage);
-        
-        const selected = suggestions[selectedSuggestion];
-        onSystemTypeSelected(selected.systemType);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to select system type';
-        toast.error(errorMessage);
-      }
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      send();
     }
   };
 
-  const getConfidenceColor = (confidence: string) => {
-    switch (confidence) {
-      case 'high':
-        return 'bg-green-100 text-green-700 border-green-300';
-      case 'medium':
-        return 'bg-blue-100 text-blue-700 border-blue-300';
-      case 'low':
-        return 'bg-gray-100 text-gray-700 border-gray-300';
-      default:
-        return 'bg-gray-100 text-gray-700 border-gray-300';
+  const handleConfirm = async () => {
+    if (selected === null || !sessionId) return;
+    setConfirming(true);
+    try {
+      await selectSystemType(sessionId, selected);
+      const s = suggestions[selected];
+      toast.success(`System type confirmed: ${s.systemType}`);
+      onSystemTypeSelected(s.systemType);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setConfirming(false);
     }
   };
-
-  const getConfidenceBadge = (confidence: string) => {
-    switch (confidence) {
-      case 'high':
-        return 'High Confidence';
-      case 'medium':
-        return 'Medium Confidence';
-      case 'low':
-        return 'Low Confidence';
-      default:
-        return 'Unknown';
-    }
-  };
-
-  // Show centered loader when analyzing (like upload page)
-  if (isAnalyzing) {
-    return (
-      <div className="h-full flex items-center justify-center p-8">
-        <div className="w-full max-w-2xl">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-6"
-          >
-            <div className="rounded-xl border border-gray-300 bg-gray-50 p-12 text-center transition-all">
-              <div className="space-y-4">
-                <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mx-auto" />
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                  Analyzing System Components...
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  AI is analyzing your BOM to suggest system types
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      </div>
-    );
-  }
-
-  // Show centered form when no suggestions generated yet
-  if (!hasGenerated && !isAnalyzing) {
-    return (
-      <div className="h-full flex items-center justify-center p-8">
-        <div className="w-full max-w-2xl">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-6"
-          >
-            {/* Context Input Form */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="rounded-xl border border-gray-300 bg-white p-6"
-            >
-            <div className="space-y-6">
-              <div>
-                <label htmlFor="additional-context" className="block text-sm font-semibold text-gray-900 mb-2">
-                  Additional Context (Optional)
-                </label>
-                <p className="text-xs text-gray-600 mb-3">
-                  Provide additional context about your system to help AI generate more accurate suggestions. 
-                  For example: "This is for an automotive power management system" or "Industrial IoT device for monitoring"
-                </p>
-                <textarea
-                  id="additional-context"
-                  value={additionalContext}
-                  onChange={(e) => setAdditionalContext(e.target.value)}
-                  placeholder="e.g., This is for an automotive power management system..."
-                  rows={4}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-blue-400 focus:outline-none resize-none text-sm"
-                />
-                <p className="text-xs text-gray-500 mt-2">
-                  Leave empty to generate without additional context
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleGenerate}
-                  disabled={isAnalyzing || !sessionId}
-                  className="flex-1 rounded-lg bg-blue-600 px-6 py-3 text-white font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-                >
-                  {isAnalyzing ? (
-                    <>
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                      Analyzing...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-5 w-5" />
-                      Generate System Type Suggestions
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-          </motion.div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="h-full overflow-y-auto p-8">
-      <div className="w-full max-w-6xl mx-auto">
-        {/* Error State */}
-        {error && !isAnalyzing && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl border border-gray-300 bg-white p-12 mb-8"
-          >
-            <div className="flex flex-col items-center justify-center space-y-4">
-              <AlertCircle className="h-16 w-16 text-gray-400" />
-              <div className="text-center">
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                  Unable to Analyze System
-                </h3>
-                <p className="text-lg text-gray-600 mb-4">
-                  {error}
-                </p>
-                <p className="text-sm text-gray-500 mb-4">
-                  Please make sure you have completed classification and try again.
-                </p>
-                <button
-                  onClick={handleGenerate}
-                  className="rounded-lg bg-blue-600 px-6 py-3 text-white font-medium hover:bg-blue-700 transition-colors"
-                >
-                  Try Again
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
+    <div className="h-full flex overflow-hidden bg-gray-50">
 
-        {/* Suggestions Display */}
-        {!isAnalyzing && !error && suggestions.length > 0 && (
-          <>
-            <div className="mb-6">
-              <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 flex items-start gap-3">
-                <Info className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
-                <div className="text-sm text-gray-700 flex-1">
-                  <strong>Select a System Type:</strong> Review the AI suggestions below and select the system type that best matches your design. Each suggestion includes architectural clues, application domains, and confidence level.
-                  {additionalContext && (
-                    <div className="mt-2 pt-2 border-t border-blue-300">
-                      <strong>Context used:</strong> "{additionalContext}"
+      {/* ── Left: console ───────────────────────────────────────── */}
+      <div className="flex flex-col flex-1 min-w-0 border-r border-gray-200 bg-white">
+
+        {/* Header */}
+        <div className="shrink-0 px-6 py-3 border-b border-gray-100 bg-white">
+          <h2 className="font-semibold text-gray-900 text-sm">System Identification</h2>
+          <p className="text-xs text-gray-400 font-mono mt-0.5">session · {sessionId?.slice(0, 8) ?? '—'}</p>
+        </div>
+
+        {/* Output stream */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-2 font-mono text-sm">
+          {lines.length === 0 && !loading && (
+            <span className="text-gray-300 text-xs">initializing…</span>
+          )}
+
+          <AnimatePresence initial={false}>
+            {lines.map(line => (
+              <motion.div
+                key={line.id}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.1 }}
+                className="leading-relaxed"
+              >
+                {line.type === 'input' && (
+                  <div className="flex gap-2">
+                    <span className="text-blue-500 select-none shrink-0">❯</span>
+                    <span className="text-gray-800">{line.content}</span>
+                  </div>
+                )}
+                {line.type === 'output' && (
+                  <div className="text-gray-600 whitespace-pre-wrap pl-5">
+                    {line.content}
+                  </div>
+                )}
+                {line.type === 'system' && (
+                  <div className="text-blue-600 pl-5">{line.content}</div>
+                )}
+                {line.type === 'error' && (
+                  <div className="text-red-500 pl-5">{line.content}</div>
+                )}
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
+          {loading && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="pl-5 flex items-center gap-2 text-gray-400"
+            >
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span className="text-xs">processing…</span>
+            </motion.div>
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Input row */}
+        <div className="shrink-0 border-t border-gray-100 bg-white px-6 py-3">
+          <div className="flex items-center gap-2">
+            <span className="text-blue-500 font-mono text-sm select-none">❯</span>
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="Type a response or ask for different options…"
+              disabled={loading}
+              className="flex-1 bg-transparent font-mono text-sm text-gray-800 placeholder-gray-300 outline-none caret-blue-500 disabled:opacity-40"
+            />
+            {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-300 shrink-0" />}
+          </div>
+          <p className="text-xs text-gray-300 font-mono mt-1.5 pl-5">enter to send</p>
+        </div>
+      </div>
+
+      {/* ── Right: results panel ─────────────────────────────────── */}
+      <div className="w-[420px] shrink-0 flex flex-col overflow-hidden bg-gray-50">
+
+        {/* Panel header */}
+        <div className="shrink-0 px-5 py-4 border-b border-gray-200">
+          <h3 className="font-semibold text-gray-900 text-sm">
+            {suggestions.length > 0
+              ? `${suggestions.length} System Type Options`
+              : 'Waiting for identification…'}
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {suggestions.length > 0
+              ? 'Select the best match and confirm to proceed'
+              : 'Options will appear here as the conversation progresses'}
+          </p>
+        </div>
+
+        {/* Cards */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+          {suggestions.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12 text-gray-400 space-y-3">
+              <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
+                <Info className="h-6 w-6 text-gray-300" />
+              </div>
+              <p className="text-sm">Answer the questions on the left.<br />Options will appear here automatically.</p>
+            </div>
+          )}
+
+          <AnimatePresence>
+            {suggestions.map((s, i) => {
+              const isSelected = selected === i;
+              return (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                  onClick={() => setSelected(isSelected ? null : i)}
+                  className={`rounded-xl border p-4 cursor-pointer transition-all ${
+                    isSelected
+                      ? 'border-blue-500 bg-blue-50 shadow-sm'
+                      : 'border-gray-200 bg-white hover:border-blue-300'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                        isSelected ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'
+                      }`}>{i + 1}</span>
+                      <h4 className="font-semibold text-gray-900 text-sm leading-tight">{s.systemType}</h4>
+                    </div>
+                    {isSelected && <CheckCircle className="h-4 w-4 text-blue-500 shrink-0" />}
+                  </div>
+
+                  <p className="text-xs text-gray-600 mb-2 pl-8">{s.primaryFunction}</p>
+
+                  <span className={`inline-block ml-8 px-2 py-0.5 rounded-full text-xs font-medium border ${CONFIDENCE_STYLES[s.confidence] ?? CONFIDENCE_STYLES.low}`}>
+                    {s.confidence.charAt(0).toUpperCase() + s.confidence.slice(1)} confidence
+                  </span>
+
+                  {isSelected && (
+                    <div className="mt-3 pt-3 border-t border-blue-200 pl-8 space-y-2">
+                      {s.keyArchitecturalClues?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-700 mb-1 flex items-center gap-1">
+                            <Zap className="h-3 w-3 text-blue-500" /> Key clues
+                          </p>
+                          <ul className="space-y-0.5">
+                            {s.keyArchitecturalClues.slice(0, 4).map((c, ci) => (
+                              <li key={ci} className="text-xs text-gray-600 flex gap-1.5">
+                                <span className="text-blue-400 mt-0.5">·</span>{c}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-600 italic">{s.reasoning}</p>
                     </div>
                   )}
-                </div>
-              </div>
-            </div>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+        </div>
 
-            <div className="space-y-6">
-              {suggestions.map((suggestion, index) => {
-                const isSelected = selectedSuggestion === index;
-                
-                return (
-                  <motion.div
-                    key={index}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    onClick={() => handleSelectSuggestion(index)}
-                    className={`rounded-lg border p-6 transition-all ${
-                      isSelected
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-300 bg-white hover:border-blue-300 cursor-pointer'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                            isSelected ? 'bg-blue-500' : 'bg-gray-200'
-                          }`}>
-                            <span className={`text-lg font-bold ${
-                              isSelected ? 'text-white' : 'text-gray-600'
-                            }`}>
-                              {index + 1}
-                            </span>
-                          </div>
-                          <div className="flex-1">
-                            <h3 className="text-xl font-bold text-gray-900 mb-1">
-                              {suggestion.systemType}
-                            </h3>
-                            <p className="text-sm text-gray-600">
-                              {suggestion.primaryFunction}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getConfidenceColor(suggestion.confidence)}`}>
-                          {getConfidenceBadge(suggestion.confidence)}
-                        </span>
-                        {isSelected && (
-                          <CheckCircle className="h-6 w-6 text-green-600" />
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                      <div>
-                        <h4 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                          <Zap className="h-4 w-4 text-blue-600" />
-                          Key Architectural Clues
-                        </h4>
-                        <ul className="space-y-1">
-                          {suggestion.keyArchitecturalClues.map((clue, clueIndex) => (
-                            <li key={clueIndex} className="text-xs text-gray-600 flex items-start gap-2">
-                              <span className="text-blue-600 mt-1">•</span>
-                              <span>{clue}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                          <Info className="h-4 w-4 text-blue-600" />
-                          Likely Application Domains
-                        </h4>
-                        <div className="flex flex-wrap gap-2">
-                          {suggestion.likelyApplicationDomains.map((domain, domainIndex) => (
-                            <span
-                              key={domainIndex}
-                              className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium"
-                            >
-                              {domain}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-4 border-t border-gray-200">
-                      <p className="text-sm text-gray-700">
-                        <strong>Reasoning:</strong> {suggestion.reasoning}
-                      </p>
-                    </div>
-
-                    {/* Proceed Button - Only show when selected */}
-                    {isSelected && (
-                      <div className="mt-6 pt-6 border-t border-blue-200" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={handleProceed}
-                          className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-3.5 text-white font-semibold hover:from-blue-700 hover:to-blue-800 active:scale-[0.98] flex items-center justify-center gap-2.5 transition-all duration-200 shadow-lg hover:shadow-xl"
-                        >
-                          <CheckCircle className="h-5 w-5" />
-                          <span>Proceed with {suggestion.systemType}</span>
-                        </button>
-                      </div>
-                    )}
-                  </motion.div>
-                );
-              })}
-            </div>
-          </>
+        {/* Confirm button */}
+        {selected !== null && (
+          <div className="shrink-0 px-4 py-4 border-t border-gray-200 bg-white">
+            <button
+              onClick={handleConfirm}
+              disabled={confirming}
+              className="w-full rounded-xl bg-blue-600 py-3 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+            >
+              {confirming
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Confirming…</>
+                : <><CheckCircle className="h-4 w-4" /> Confirm {suggestions[selected]?.systemType}</>
+              }
+            </button>
+          </div>
         )}
       </div>
+
     </div>
   );
 }
