@@ -27,7 +27,7 @@ export function ValidatePage() {
 
   const handleValidationComplete = () => {
     const activeSessionId = contextSessionId || querySessionId;
-    toast.success('All components validated!');
+    toast.success('Parts confirmed!');
     if (activeSessionId) {
       navigate(`/requirements?session=${activeSessionId}`);
     } else {

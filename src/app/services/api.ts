@@ -433,9 +433,12 @@ export async function selectSystemType(
 export interface ValidationResult {
     mpn: string;
     manufacturer: string | null;
-    status: 'valid' | 'invalid';
+    status: 'valid' | 'unresolved';
     confidence: number;
     source: string | null;
+    category: string | null;
+    description: string | null;
+    datasheet_url: string | null;
     suggestions: any[];
     message: string;
 }
