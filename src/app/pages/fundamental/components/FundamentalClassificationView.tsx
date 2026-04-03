@@ -820,6 +820,8 @@ export function FundamentalClassificationView({
   const [enrichedParts, setEnrichedParts] = useState<PartDetail[]>([]);
   const [pendingAction, setPendingAction] = useState<PartEnrichmentResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // When forceClassifyPhase, don't render ClassifyPhase until data is loaded
+  const [loading, setLoading] = useState(forceClassifyPhase);
 
   // Load classification data on mount.
   // When forceClassifyPhase=true (Classification page), always load and go straight to classify.
@@ -842,6 +844,9 @@ export function FundamentalClassificationView({
       })
       .catch(() => {
         // 404 or error — stay on current phase
+      })
+      .finally(() => {
+        if (forceClassifyPhase) setLoading(false);
       });
   }, [sessionId, refreshTrigger, forceClassifyPhase]);
 
@@ -849,6 +854,17 @@ export function FundamentalClassificationView({
     return (
       <div className="h-full flex items-center justify-center">
         <p className="text-gray-500">No session. Please upload a BOM first.</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Loading parts…</p>
+        </div>
       </div>
     );
   }
