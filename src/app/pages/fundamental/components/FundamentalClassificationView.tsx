@@ -5,7 +5,7 @@ import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight, Rot
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { classifyPartsStream, selectPartMatch, getClassification, bulkUpdateClassification } from '@/app/services/api';
+import { classifyPartsStream, selectPartMatch, getClassification, bulkUpdateClassification, confirmWebPart, saveCustomPart, suggestPartFields } from '@/app/services/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -14,16 +14,32 @@ type Phase = 'research' | 'selection' | 'classify';
 interface StreamLine {
   id: string;
   mpn?: string;
-  icon: 'spin' | 'check' | 'miss' | 'cached' | 'classify';
+  icon: 'spin' | 'check' | 'miss' | 'web' | 'cached' | 'classify';
   text: string;
   meta?: string;   // category · manufacturer
-  source?: string; // nexar / tavily / cache
+  source?: string; // nexar / tavily / cache / web
   multiMatch?: boolean;
+  webFound?: boolean;
+  notFound?: boolean;
+}
+
+// Carries enrichment result for parts needing user action in selection phase
+interface PartEnrichmentResult {
+  mpn: string;
+  status: 'multi_match' | 'web_found' | 'not_found';
+  description?: string | null;
+  datasheet_url?: string | null;
+  product_url?: string | null;
+  source?: string;
+  confidence?: string;
+  candidates?: import('@/app/services/api').PartCandidate[];
 }
 
 interface FundamentalClassificationViewProps {
   components: Component[];
   onClassificationComplete: (classifiedComponents: Component[]) => void;
+  /** When true, skip Research/Selection and start directly in ClassifyPhase. */
+  forceClassifyPhase?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -36,10 +52,16 @@ function srcBadge(source: string | undefined | null) {
     tavily: 'bg-purple-50 text-purple-600 border-purple-200',
     cache: 'bg-gray-50 text-gray-500 border-gray-200',
     combined: 'bg-indigo-50 text-indigo-600 border-indigo-200',
+    web: 'bg-purple-50 text-purple-600 border-purple-200',
+    web_broad: 'bg-orange-50 text-orange-600 border-orange-200',
+    web_confirmed: 'bg-teal-50 text-teal-600 border-teal-200',
+    user_provided: 'bg-green-50 text-green-700 border-green-300',
   };
   const label: Record<string, string> = {
     nexar: 'nexar', nexar_confirmed: 'confirmed', tavily: 'tavily',
     cache: 'cached', combined: 'nexar+web',
+    web: 'web', web_broad: 'ai search', web_confirmed: 'web ✓',
+    user_provided: 'manual',
   };
   const cls = styles[source] ?? styles.cache;
   return (
@@ -53,7 +75,7 @@ function srcBadge(source: string | undefined | null) {
 
 function ResearchPhase({ sessionId, onComplete, setCurrentStage }: {
   sessionId: string;
-  onComplete: (result: PartDetail[]) => void;
+  onComplete: (result: PartDetail[], needsAction: PartEnrichmentResult[]) => void;
   setCurrentStage: (s: number | null) => void;
 }) {
   const [lines, setLines] = useState<StreamLine[]>([]);
@@ -62,6 +84,8 @@ function ResearchPhase({ sessionId, onComplete, setCurrentStage }: {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
+  // Collect parts needing user action (multi_match / web_found / not_found)
+  const needsActionRef = useRef<PartEnrichmentResult[]>([]);
 
   const push = (line: StreamLine) =>
     setLines(prev => [...prev, line]);
@@ -84,24 +108,71 @@ function ResearchPhase({ sessionId, onComplete, setCurrentStage }: {
           push({ id: 'start', icon: 'classify', text: event.message });
         } else if (event.type === 'searching') {
           push({ id: event.mpn, icon: 'spin', text: `Looking up`, mpn: event.mpn });
+        // ── New cascade event types ──
+        } else if (event.type === 'exact_match') {
+          const meta = [event.category, event.candidates?.[0]?.manufacturer].filter(Boolean).join(' · ');
+          replace(event.mpn, {
+            icon: 'check',
+            text: event.category || 'identified',
+            meta,
+            source: event.source,
+          });
+        } else if (event.type === 'multi_match') {
+          replace(event.mpn, {
+            icon: 'miss',
+            text: `${event.candidate_count} candidates — pick one`,
+            source: event.source,
+            multiMatch: true,
+          });
+          needsActionRef.current.push({
+            mpn: event.mpn, status: 'multi_match',
+            description: event.description,
+            source: event.source,
+            candidates: event.candidates,
+          });
+        } else if (event.type === 'web_found') {
+          replace(event.mpn, {
+            icon: 'web',
+            text: event.datasheet_url ? 'datasheet found — confirm' : 'web reference found — confirm',
+            source: event.source,
+            webFound: true,
+          });
+          needsActionRef.current.push({
+            mpn: event.mpn, status: 'web_found',
+            description: event.description,
+            datasheet_url: event.datasheet_url,
+            product_url: event.product_url,
+            confidence: event.confidence,
+            source: event.source,
+          });
+        // ── Legacy event types (cache hits emitted as found/cached) ──
         } else if (event.type === 'found' || event.type === 'cached') {
           const meta = [event.category, event.candidates?.[0]?.manufacturer].filter(Boolean).join(' · ');
           const multi = (event.candidates?.length ?? 0) > 1 && !event.candidates?.[0]?.is_exact_match;
-          replace(event.type === 'cached' ? event.mpn : event.mpn, {
+          replace(event.mpn, {
             icon: multi ? 'miss' : 'check',
             text: multi ? `${event.candidates!.length} candidates — review needed` : (event.category || 'found'),
             meta,
             source: event.source,
             multiMatch: multi,
           });
+          if (multi) {
+            needsActionRef.current.push({
+              mpn: event.mpn, status: 'multi_match',
+              description: event.description ?? null,
+              source: event.source,
+              candidates: event.candidates,
+            });
+          }
         } else if (event.type === 'not_found') {
-          replace(event.mpn, { icon: 'miss', text: 'not found in Nexar', source: undefined });
+          replace(event.mpn, { icon: 'miss', text: 'not found — add manually', notFound: true });
+          needsActionRef.current.push({ mpn: event.mpn, status: 'not_found' });
         } else if (event.type === 'classifying') {
           push({ id: 'classifying', icon: 'classify', text: event.message });
         } else if (event.type === 'complete') {
           push({ id: 'done', icon: 'check', text: `Done — ${event.result.non_auxiliary_parts} fundamental, ${event.result.auxiliary_parts} auxiliary` });
           setDone(true);
-          setTimeout(() => onComplete(event.result.parts ?? []), 600);
+          setTimeout(() => onComplete(event.result.parts ?? [], needsActionRef.current), 600);
         } else if (event.type === 'error') {
           setError(event.message);
         }
@@ -114,6 +185,7 @@ function ResearchPhase({ sessionId, onComplete, setCurrentStage }: {
     if (icon === 'spin') return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400 shrink-0" />;
     if (icon === 'check') return <span className="text-green-500 shrink-0 font-bold text-xs">✓</span>;
     if (icon === 'miss') return <span className="text-yellow-500 shrink-0 font-bold text-xs">?</span>;
+    if (icon === 'web') return <span className="text-purple-400 shrink-0 font-bold text-xs">⌂</span>;
     if (icon === 'cached') return <span className="text-blue-400 shrink-0 font-bold text-xs">↩</span>;
     return <span className="text-gray-400 shrink-0 text-xs">·</span>;
   };
@@ -178,42 +250,90 @@ function ResearchPhase({ sessionId, onComplete, setCurrentStage }: {
   );
 }
 
-// ── Phase 2: MPN Selection ─────────────────────────────────────────────────────
+// ── Phase 2: Unified Selection (multi_match + web_found + not_found) ──────────
 
-function SelectionPhase({ parts, onComplete }: {
+function SelectionPhase({ parts, needsAction, onComplete }: {
   parts: PartDetail[];
+  needsAction: PartEnrichmentResult[];
   onComplete: (parts: PartDetail[]) => void;
 }) {
   const { sessionId } = useSession();
-  // Only show parts that have multiple candidates AND no exact match
-  const needsSelection = parts.filter(
-    p => (p.candidates?.length ?? 0) > 1 && !p.candidates?.[0]?.is_exact_match
+
+  // multi_match: pick from Nexar candidates
+  const multiMatch = needsAction.filter(a => a.status === 'multi_match');
+  // web_found: confirm web reference / datasheet
+  const webFound = needsAction.filter(a => a.status === 'web_found');
+  // not_found: fill in manually
+  const notFound = needsAction.filter(a => a.status === 'not_found');
+
+  const total = multiMatch.length + webFound.length + notFound.length;
+
+  // multi_match state: {mpn → selected index}
+  const [multiSel, setMultiSel] = useState<Record<string, number>>(() =>
+    Object.fromEntries(multiMatch.map(a => [a.mpn, 0]))
   );
 
-  const [selections, setSelections] = useState<Record<string, number>>(() => {
-    const m: Record<string, number> = {};
-    needsSelection.forEach(p => { m[p.part_number] = 0; });
-    return m;
-  });
+  // web_found state: {mpn → {confirmed, skipped}}
+  const [webSel, setWebSel] = useState<Record<string, { confirmed: boolean; skipped: boolean }>>(() =>
+    Object.fromEntries(webFound.map(a => [a.mpn, { confirmed: false, skipped: false }]))
+  );
+
+  // not_found state: {mpn → custom form fields}
+  interface CustomFields { description: string; manufacturer: string; category: string; datasheet_url: string; extraFields: Record<string, string>; suggestedFields: string[]; loadingFields: boolean; }
+  const [customForms, setCustomForms] = useState<Record<string, CustomFields>>(() =>
+    Object.fromEntries(notFound.map(a => [a.mpn, {
+      description: '', manufacturer: '', category: '', datasheet_url: '',
+      extraFields: {}, suggestedFields: [], loadingFields: false,
+    }]))
+  );
+
   const [saving, setSaving] = useState(false);
+
+  const loadSuggestedFields = async (mpn: string) => {
+    if (!sessionId) return;
+    setCustomForms(prev => ({ ...prev, [mpn]: { ...prev[mpn], loadingFields: true } }));
+    const form = customForms[mpn];
+    const fields = await suggestPartFields(sessionId, mpn, form.description || null, form.category || null);
+    setCustomForms(prev => ({
+      ...prev,
+      [mpn]: { ...prev[mpn], loadingFields: false, suggestedFields: fields, extraFields: Object.fromEntries(fields.map(f => [f, ''])) }
+    }));
+  };
 
   const handleConfirm = async () => {
     if (!sessionId) return;
     setSaving(true);
     try {
-      for (const p of needsSelection) {
-        const idx = selections[p.part_number] ?? 0;
-        const candidate = p.candidates[idx];
-        await selectPartMatch(sessionId, p.part_number, candidate);
+      // 1. Save multi_match selections
+      for (const a of multiMatch) {
+        const candidates = a.candidates ?? [];
+        const idx = multiSel[a.mpn] ?? 0;
+        if (candidates[idx]) {
+          await selectPartMatch(sessionId, a.mpn, candidates[idx]);
+        }
       }
-      // Merge selections back into parts
-      const updated = parts.map(p => {
-        const idx = selections[p.part_number];
-        if (idx === undefined) return p;
-        const c = p.candidates[idx];
-        return { ...p, category: c.category, description: c.description, manufacturer: c.manufacturer, confidence: c.confidence };
-      });
-      onComplete(updated);
+      // 2. Save web_found confirmations
+      for (const a of webFound) {
+        const sel = webSel[a.mpn];
+        if (sel?.confirmed) {
+          await confirmWebPart(sessionId, a.mpn, a.product_url ?? null, a.datasheet_url ?? null, a.description ?? null, null);
+        }
+      }
+      // 3. Save custom parts
+      for (const a of notFound) {
+        const form = customForms[a.mpn];
+        const hasAny = form.description || form.manufacturer || form.category || Object.values(form.extraFields).some(Boolean);
+        if (hasAny) {
+          await saveCustomPart(sessionId, a.mpn, {
+            manufacturer: form.manufacturer || undefined,
+            description: form.description || undefined,
+            category: form.category || undefined,
+            datasheet_url: form.datasheet_url || undefined,
+            specs: Object.fromEntries(Object.entries(form.extraFields).filter(([, v]) => v)),
+          });
+        }
+      }
+      onComplete(parts);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -221,7 +341,7 @@ function SelectionPhase({ parts, onComplete }: {
     }
   };
 
-  if (needsSelection.length === 0) {
+  if (total === 0) {
     onComplete(parts);
     return null;
   }
@@ -229,60 +349,183 @@ function SelectionPhase({ parts, onComplete }: {
   return (
     <div className="h-full flex flex-col bg-gray-50">
       <div className="shrink-0 px-8 py-5 bg-white border-b">
-        <h2 className="text-lg font-semibold text-gray-900">Confirm Part Matches</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Part Confirmation Required</h2>
         <p className="text-sm text-gray-500 mt-0.5">
-          {needsSelection.length} part{needsSelection.length !== 1 ? 's' : ''} with ambiguous Nexar results — pick the correct match.
+          {total} part{total !== 1 ? 's' : ''} need your input before classification can continue.
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4">
-        {needsSelection.map(part => (
-          <div key={part.part_number} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="font-mono font-bold text-gray-900">{part.part_number}</span>
-              <span className="text-xs text-yellow-600 bg-yellow-50 border border-yellow-200 px-2 py-0.5 rounded-full">
-                {part.candidates.length} matches
-              </span>
-            </div>
-            <div className="grid gap-2">
-              {part.candidates.map((c, i) => (
-                <button
-                  key={c.mpn}
-                  onClick={() => setSelections(prev => ({ ...prev, [part.part_number]: i }))}
-                  className={`text-left rounded-lg border p-3 transition-all ${
-                    selections[part.part_number] === i
-                      ? 'border-blue-500 bg-blue-50 shadow-sm'
-                      : 'border-gray-200 hover:border-blue-300'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-mono text-sm font-semibold text-gray-900">{c.mpn}</div>
-                      {c.category && <div className="text-xs text-gray-600 mt-0.5">{c.category}</div>}
-                      {c.description && <div className="text-xs text-gray-400 truncate mt-0.5">{c.description}</div>}
-                      {c.manufacturer && <div className="text-xs text-gray-500 mt-1">{c.manufacturer}</div>}
-                    </div>
-                    <div className="shrink-0 flex flex-col items-end gap-1">
-                      {c.is_exact_match && (
-                        <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">exact</span>
-                      )}
-                      {c.datasheet_url && (
-                        <a href={c.datasheet_url} target="_blank" rel="noopener noreferrer"
-                           onClick={e => e.stopPropagation()}
-                           className="text-xs text-blue-500 hover:underline flex items-center gap-0.5">
-                          <ExternalLink className="h-3 w-3" /> datasheet
-                        </a>
-                      )}
-                      {selections[part.part_number] === i && (
-                        <CheckCircle className="h-4 w-4 text-blue-500" />
-                      )}
-                    </div>
+      <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+        {/* ── Multi-match: pick from Nexar candidates ── */}
+        {multiMatch.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <span className="h-5 w-5 rounded-full bg-yellow-100 text-yellow-700 text-xs flex items-center justify-center font-bold">{multiMatch.length}</span>
+              Multiple Nexar matches — pick the correct one
+            </h3>
+            <div className="space-y-4">
+              {multiMatch.map(a => (
+                <div key={a.mpn} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="font-mono font-bold text-gray-900">{a.mpn}</span>
+                    {a.description && <span className="text-xs text-gray-400 truncate">{a.description}</span>}
                   </div>
-                </button>
+                  <div className="grid gap-2">
+                    {(a.candidates ?? []).map((c, i) => (
+                      <button
+                        key={c.mpn}
+                        onClick={() => setMultiSel(prev => ({ ...prev, [a.mpn]: i }))}
+                        className={`text-left rounded-lg border p-3 transition-all ${
+                          multiSel[a.mpn] === i ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-mono text-sm font-semibold text-gray-900">{c.mpn}</div>
+                            {c.category && <div className="text-xs text-gray-600 mt-0.5">{c.category}</div>}
+                            {c.description && <div className="text-xs text-gray-400 truncate">{c.description}</div>}
+                            {c.manufacturer && <div className="text-xs text-gray-500 mt-1">{c.manufacturer}</div>}
+                          </div>
+                          <div className="shrink-0 flex flex-col items-end gap-1">
+                            {c.is_exact_match && <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">exact</span>}
+                            {c.datasheet_url && (
+                              <a href={c.datasheet_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                                 className="text-xs text-blue-500 hover:underline flex items-center gap-0.5">
+                                <ExternalLink className="h-3 w-3" /> datasheet
+                              </a>
+                            )}
+                            {multiSel[a.mpn] === i && <CheckCircle className="h-4 w-4 text-blue-500" />}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
-        ))}
+          </section>
+        )}
+
+        {/* ── Web-found: confirm reference ── */}
+        {webFound.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <span className="h-5 w-5 rounded-full bg-purple-100 text-purple-700 text-xs flex items-center justify-center font-bold">{webFound.length}</span>
+              Found via web — confirm reference
+            </h3>
+            <div className="space-y-3">
+              {webFound.map(a => (
+                <div key={a.mpn} className={`bg-white border rounded-xl p-4 shadow-sm transition-all ${
+                  webSel[a.mpn]?.confirmed ? 'border-green-300' : webSel[a.mpn]?.skipped ? 'border-gray-200 opacity-60' : 'border-purple-200'
+                }`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-gray-900">{a.mpn}</span>
+                        {srcBadge(a.source)}
+                        <span className="text-xs text-gray-400">conf: {parseFloat(a.confidence ?? '0').toFixed(2)}</span>
+                      </div>
+                      {a.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{a.description}</p>}
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {a.datasheet_url && (
+                          <a href={a.datasheet_url} target="_blank" rel="noopener noreferrer"
+                             className="text-xs text-blue-600 hover:underline flex items-center gap-0.5 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
+                            <ExternalLink className="h-3 w-3" /> Datasheet
+                          </a>
+                        )}
+                        {a.product_url && (
+                          <a href={a.product_url} target="_blank" rel="noopener noreferrer"
+                             className="text-xs text-gray-600 hover:underline flex items-center gap-0.5 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
+                            <ExternalLink className="h-3 w-3" /> Product page
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <button
+                        onClick={() => setWebSel(prev => ({ ...prev, [a.mpn]: { confirmed: true, skipped: false } }))}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                          webSel[a.mpn]?.confirmed ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700 border border-green-300 hover:bg-green-100'
+                        }`}
+                      >
+                        {webSel[a.mpn]?.confirmed ? '✓ Confirmed' : 'Confirm'}
+                      </button>
+                      <button
+                        onClick={() => setWebSel(prev => ({ ...prev, [a.mpn]: { confirmed: false, skipped: true } }))}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                          webSel[a.mpn]?.skipped ? 'bg-gray-400 text-white' : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        Skip
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ── Not-found: manual entry ── */}
+        {notFound.length > 0 && (
+          <section>
+            <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <span className="h-5 w-5 rounded-full bg-red-100 text-red-700 text-xs flex items-center justify-center font-bold">{notFound.length}</span>
+              Not found — enter specs manually (or skip)
+            </h3>
+            <div className="space-y-4">
+              {notFound.map(a => {
+                const form = customForms[a.mpn];
+                return (
+                  <div key={a.mpn} className="bg-white border border-red-200 rounded-xl p-5 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-mono font-bold text-gray-900">{a.mpn}</span>
+                      <span className="text-xs text-red-500 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">not found</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      {(['description', 'manufacturer', 'category', 'datasheet_url'] as const).map(field => (
+                        <div key={field} className={field === 'description' ? 'col-span-2' : ''}>
+                          <label className="text-[11px] text-gray-500 mb-0.5 block capitalize">{field.replace('_', ' ')}</label>
+                          <input
+                            type="text"
+                            value={form[field]}
+                            onChange={e => setCustomForms(prev => ({ ...prev, [a.mpn]: { ...prev[a.mpn], [field]: e.target.value } }))}
+                            placeholder={field === 'datasheet_url' ? 'https://…' : `Enter ${field}`}
+                            className="w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    {/* Extra spec fields */}
+                    {form.suggestedFields.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        {form.suggestedFields.map(f => (
+                          <div key={f}>
+                            <label className="text-[11px] text-gray-500 mb-0.5 block">{f.replace(/_/g, ' ')}</label>
+                            <input
+                              type="text"
+                              value={form.extraFields[f] ?? ''}
+                              onChange={e => setCustomForms(prev => ({ ...prev, [a.mpn]: { ...prev[a.mpn], extraFields: { ...prev[a.mpn].extraFields, [f]: e.target.value } } }))}
+                              className="w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => loadSuggestedFields(a.mpn)}
+                      disabled={form.loadingFields}
+                      className="text-xs text-blue-600 hover:underline flex items-center gap-1 disabled:opacity-50"
+                    >
+                      {form.loadingFields ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+                      {form.suggestedFields.length > 0 ? 'Refresh AI suggestions' : 'Ask AI for spec fields'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
 
       <div className="shrink-0 px-8 py-4 border-t bg-white">
@@ -291,7 +534,7 @@ function SelectionPhase({ parts, onComplete }: {
           disabled={saving}
           className="w-full rounded-xl bg-blue-600 py-3 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
         >
-          {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><CheckCircle className="h-4 w-4" /> Confirm Selections</>}
+          {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><CheckCircle className="h-4 w-4" /> Confirm &amp; Continue</>}
         </button>
       </div>
     </div>
@@ -570,30 +813,37 @@ function ClassifyPhase({ initialParts, onComplete }: {
 export function FundamentalClassificationView({
   components: _components,
   onClassificationComplete,
+  forceClassifyPhase = false,
 }: FundamentalClassificationViewProps) {
   const { sessionId, setCurrentStage, refreshTrigger } = useSession();
-  const [phase, setPhase] = useState<Phase>('research');
+  const [phase, setPhase] = useState<Phase>(forceClassifyPhase ? 'classify' : 'research');
   const [enrichedParts, setEnrichedParts] = useState<PartDetail[]>([]);
+  const [pendingAction, setPendingAction] = useState<PartEnrichmentResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // If session already has classification data (navigating back), skip research
+  // Load classification data on mount.
+  // When forceClassifyPhase=true (Classification page), always load and go straight to classify.
+  // When in normal mode, skip research if already classified.
   useEffect(() => {
     if (!sessionId) return;
-    // Check if classification already done by fetching GET endpoint
     getClassification(sessionId)
       .then(result => {
-        const allNull = Object.values(result.classification_map).every(v => v === null);
-        if (!allNull && result.parts?.length) {
-          // Already classified — jump to classify phase
+        if (result.parts?.length) {
           setEnrichedParts(result.parts);
-          setPhase('classify');
+          if (forceClassifyPhase) {
+            setPhase('classify');
+          } else {
+            const allNull = Object.values(result.classification_map).every(v => v === null);
+            if (!allNull) {
+              setPhase('classify');
+            }
+          }
         }
-        // Otherwise stay on research phase (will run stream)
       })
       .catch(() => {
-        // 404 or error — start fresh with research
+        // 404 or error — stay on current phase
       });
-  }, [sessionId, refreshTrigger]);
+  }, [sessionId, refreshTrigger, forceClassifyPhase]);
 
   if (!sessionId) {
     return (
@@ -608,11 +858,10 @@ export function FundamentalClassificationView({
       <ResearchPhase
         sessionId={sessionId}
         setCurrentStage={setCurrentStage}
-        onComplete={parts => {
+        onComplete={(parts, needsAction) => {
           setEnrichedParts(parts);
-          // Check if any parts need selection
-          const needsSel = parts.some(p => (p.candidates?.length ?? 0) > 1 && !p.candidates?.[0]?.is_exact_match);
-          setPhase(needsSel ? 'selection' : 'classify');
+          setPendingAction(needsAction);
+          setPhase(needsAction.length > 0 ? 'selection' : 'classify');
         }}
       />
     );
@@ -622,6 +871,7 @@ export function FundamentalClassificationView({
     return (
       <SelectionPhase
         parts={enrichedParts}
+        needsAction={pendingAction}
         onComplete={updated => {
           setEnrichedParts(updated);
           setPhase('classify');

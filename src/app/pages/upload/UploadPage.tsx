@@ -50,9 +50,9 @@ export function UploadPage() {
   const handleProceedToClassification = () => {
     const activeSessionId = contextSessionId || querySessionId;
     if (activeSessionId) {
-      navigate(`/system-identification?session=${activeSessionId}`);
+      navigate(`/part-identification?session=${activeSessionId}`);
     } else {
-      navigate('/system-identification');
+      navigate('/part-identification');
     }
   };
 

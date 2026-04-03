@@ -1,9 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FundamentalClassificationView } from './components/FundamentalClassificationView';
-import { mockComponents } from '@/app/data/mockData';
-import type { Component } from '@/app/types';
-import { toast } from 'sonner';
+import { PartIdentificationView } from './components/PartIdentificationView';
 import { useSession } from '@/app/context/SessionContext';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
 
@@ -26,23 +23,14 @@ export function FundamentalPage() {
     }
   }, [contextSessionId, querySessionId, updateParams]);
 
-  const handleClassificationComplete = (classifiedComponents: Component[]) => {
+  const handleIdentificationComplete = () => {
     const activeSessionId = contextSessionId || querySessionId;
-    const fundamentalCount = classifiedComponents.filter(c => c.isFundamental === true).length;
-    const auxiliaryCount = classifiedComponents.filter(c => c.isFundamental === false).length;
-    
-    toast.success(`Classification complete! ${fundamentalCount} fundamental, ${auxiliaryCount} auxiliary`);
     if (activeSessionId) {
-      navigate(`/validate?session=${activeSessionId}`);
+      navigate(`/system-identification?session=${activeSessionId}`);
     } else {
-      navigate('/validate');
+      navigate('/system-identification');
     }
   };
 
-  return (
-    <FundamentalClassificationView
-      components={mockComponents}
-      onClassificationComplete={handleClassificationComplete}
-    />
-  );
+  return <PartIdentificationView onComplete={handleIdentificationComplete} />;
 }

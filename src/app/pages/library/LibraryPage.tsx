@@ -8,17 +8,18 @@ import { useSession } from '@/app/context/SessionContext';
 import { getRouteForStage } from '@/app/shared/utils/navigation';
 
 // Map API stage number to SessionStage type
-// Stages: 1=Upload, 2=Classification, 3=Analysis, 4=Validation, 5=Requirements, 6=Connections, 7=Subsystems, 8=Subsystem Reqs, 9=Finalization
+// 1=Upload, 2=Part ID, 3=System ID, 4=Classification, 5=Validation,
+// 6=Requirements, 7=Architecture, 8=Subsystems, 9=Subsystem Reqs, 10=Finalization
 const mapStageNumberToStage = (stageNumber: number): SessionStage => {
-  if (stageNumber >= 9) return 'review'; // Stage 9: Status & Finalization
-  if (stageNumber >= 8) return 'subsystems'; // Stage 8: Subsystem Requirements
-  if (stageNumber >= 7) return 'subsystems'; // Stage 7: Subsystems
-  if (stageNumber >= 6) return 'architecture'; // Stage 6: Part Connections
-  if (stageNumber >= 5) return 'requirements'; // Stage 5: Requirements
-  if (stageNumber >= 4) return 'validate'; // Stage 4: Validation
-  if (stageNumber >= 3) return 'analysis'; // Stage 3: System Analysis
-  if (stageNumber >= 2) return 'part-identification'; // Stage 2: Part Identification
-  return 'upload'; // Stage 1: Upload & Parse
+  if (stageNumber >= 10) return 'review';
+  if (stageNumber >= 8) return 'subsystems';
+  if (stageNumber >= 7) return 'architecture';
+  if (stageNumber >= 6) return 'requirements';
+  if (stageNumber >= 5) return 'validate';
+  if (stageNumber >= 4) return 'classification';
+  if (stageNumber >= 3) return 'system-identification';
+  if (stageNumber >= 2) return 'part-identification';
+  return 'upload';
 };
 
 export function LibraryPage() {
@@ -38,7 +39,7 @@ export function LibraryPage() {
         const stageMap = new Map<string, number>();
         const transformedSessions: BOMSession[] = response.boms.map((bom) => {
           const stage = mapStageNumberToStage(bom.current_stage);
-          const isComplete = bom.current_stage >= 9; // Stage 9 is considered complete
+          const isComplete = bom.current_stage >= 10; // Stage 10 is considered complete
           
           // Store original stage number for navigation
           stageMap.set(bom.bom_id, bom.current_stage);

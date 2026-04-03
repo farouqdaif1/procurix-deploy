@@ -1,5 +1,5 @@
 import type { SessionStage } from '@/app/types';
-import { Upload, Zap, FileText, Box, CheckCircle, Layers, Filter, Sparkles, ClipboardCheck, Lock } from 'lucide-react';
+import { Upload, Zap, FileText, Box, CheckCircle, Layers, Filter, Sparkles, ClipboardCheck, Lock, SlidersHorizontal } from 'lucide-react';
 
 interface StageIndicatorProps {
   currentStage: SessionStage;
@@ -10,14 +10,14 @@ interface StageIndicatorProps {
 const allStages: { id: SessionStage; label: string; icon: any; stageNumber: number }[] = [
   { id: 'upload', label: 'Upload', icon: Upload, stageNumber: 1 },
   // { id: 'discovery', label: 'Discovery', icon: Sparkles }, // Commented out
-  { id: 'system-identification', label: 'System Identification', icon: Sparkles, stageNumber: 2 },
-  { id: 'part-identification', label: 'Part Identification', icon: Filter, stageNumber: 3 },
-  { id: 'validate', label: 'Part Review', icon: Zap, stageNumber: 4 },
-  { id: 'requirements', label: 'Requirements', icon: FileText, stageNumber: 5 },
-  { id: 'architecture', label: 'Architecture', icon: Layers, stageNumber: 6 },
-
-  { id: 'subsystems', label: 'Subsystems', icon: Box, stageNumber: 7 },
-  { id: 'review', label: 'Review', icon: ClipboardCheck, stageNumber: 8 },
+  { id: 'part-identification', label: 'Part Identification', icon: Filter, stageNumber: 2 },
+  { id: 'system-identification', label: 'System Identification', icon: Sparkles, stageNumber: 3 },
+  { id: 'classification', label: 'Classification', icon: SlidersHorizontal, stageNumber: 4 },
+  { id: 'validate', label: 'Part Review', icon: Zap, stageNumber: 5 },
+  { id: 'requirements', label: 'Requirements', icon: FileText, stageNumber: 6 },
+  { id: 'architecture', label: 'Architecture', icon: Layers, stageNumber: 7 },
+  { id: 'subsystems', label: 'Subsystems', icon: Box, stageNumber: 8 },
+  { id: 'review', label: 'Review', icon: ClipboardCheck, stageNumber: 9 },
 ];
 
 // Filter out commented stages

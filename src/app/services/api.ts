@@ -87,7 +87,7 @@ export interface PartDetail {
     classification: 'auxiliary' | 'non-auxiliary' | null;
     category: string | null;
     description: string | null;
-    source: 'nexar' | 'tavily' | 'combined' | 'unknown' | 'nexar_confirmed' | null;
+    source: 'nexar' | 'web' | 'web_broad' | 'web_confirmed' | 'tavily' | 'combined' | 'unknown' | 'nexar_confirmed' | 'cache' | 'user_provided' | null;
     confidence: number;
     needs_review: boolean;
     datasheet_url: string | null;
@@ -135,8 +135,13 @@ export async function classifyParts(
 export type ClassifyStreamEvent =
   | { type: 'start'; total: number; message: string }
   | { type: 'searching'; mpn: string; message: string }
+  // Legacy event types (still supported by server for cache hits)
   | { type: 'cached'; mpn: string; category: string | null; description: string | null; source: string; candidates: PartCandidate[] }
   | { type: 'found'; mpn: string; category: string | null; description: string | null; source: string; is_exact_match: boolean; candidates: PartCandidate[] }
+  // New enrichment cascade event types
+  | { type: 'exact_match'; mpn: string; category: string | null; description: string | null; source: string; confidence: string; datasheet_url: string | null; candidates: PartCandidate[]; params: Record<string, unknown> }
+  | { type: 'multi_match'; mpn: string; description: string | null; source: string; candidates: PartCandidate[]; candidate_count: number }
+  | { type: 'web_found'; mpn: string; description: string | null; datasheet_url: string | null; product_url: string | null; confidence: string; source: string }
   | { type: 'not_found'; mpn: string; message: string }
   | { type: 'classifying'; message: string }
   | { type: 'complete'; result: ClassifyPartsResponse }
@@ -188,6 +193,57 @@ export async function classifyPartsStream(
     return finalResult;
 }
 
+// SSE streaming for Part Identification step (runs BEFORE system analysis)
+export type IdentifyPartsStreamEvent =
+  | { type: 'start'; total: number; message: string }
+  | { type: 'searching'; mpn: string }
+  | { type: 'exact_match'; mpn: string; category: string | null; description: string | null; source: string; confidence: string; datasheet_url: string | null; candidates: PartCandidate[]; params: Record<string, unknown>; impact_level: 'low' | 'high' }
+  | { type: 'multi_match'; mpn: string; description: string | null; source: string; candidates: PartCandidate[]; candidate_count: number }
+  | { type: 'web_found'; mpn: string; description: string | null; datasheet_url: string | null; product_url: string | null; confidence: string; source: string }
+  | { type: 'not_found'; mpn: string; message: string }
+  | { type: 'complete'; parts_identified: number }
+  | { type: 'error'; message: string };
+
+export async function identifyPartsStream(
+    sessionId: string,
+    onEvent: (event: IdentifyPartsStreamEvent) => void,
+    setCurrentStage?: (stage: number | null) => void
+): Promise<void> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/identify-parts/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Identify parts stream failed: ${response.status} ${text}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+                const event: IdentifyPartsStreamEvent = JSON.parse(line.slice(6));
+                onEvent(event);
+                if (event.type === 'complete' && setCurrentStage) {
+                    updateCurrentStageInContext(sessionId, setCurrentStage).catch(() => {});
+                }
+            } catch {
+                // ignore malformed events
+            }
+        }
+    }
+}
+
 export async function selectPartMatch(
     sessionId: string,
     mpn: string,
@@ -209,6 +265,90 @@ export async function selectPartMatch(
         const text = await response.text();
         throw new Error(`selectPartMatch failed: ${response.status} ${text}`);
     }
+}
+
+export async function confirmWebPart(
+    sessionId: string,
+    mpn: string,
+    confirmedUrl: string | null,
+    datasheetUrl: string | null,
+    description: string | null,
+    manufacturer: string | null,
+): Promise<{ success: boolean; enrichment_queued: boolean }> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/web-part-confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mpn, confirmed_url: confirmedUrl, datasheet_url: datasheetUrl, description, manufacturer }),
+    });
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`confirmWebPart failed: ${response.status} ${text}`);
+    }
+    return response.json();
+}
+
+export async function saveCustomPart(
+    sessionId: string,
+    mpn: string,
+    fields: { manufacturer?: string; description?: string; category?: string; datasheet_url?: string; specs?: Record<string, string> }
+): Promise<{ success: boolean }> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/custom-part`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mpn, ...fields }),
+    });
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`saveCustomPart failed: ${response.status} ${text}`);
+    }
+    return response.json();
+}
+
+export async function suggestPartFields(
+    sessionId: string,
+    mpn: string,
+    description: string | null,
+    category: string | null,
+): Promise<string[]> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/suggest-part-fields`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mpn, description, category }),
+    });
+    if (!response.ok) return ['description', 'voltage', 'current', 'package'];
+    const data = await response.json();
+    return data.suggested_fields ?? [];
+}
+
+export async function startEnrichFundamentals(
+    sessionId: string,
+): Promise<{ success: boolean; queued: string[]; count: number }> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/enrich-fundamentals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`enrich-fundamentals failed: ${response.status} ${text}`);
+    }
+    return response.json();
+}
+
+export interface EnrichmentStatusResponse {
+    success: boolean;
+    statuses: Record<string, 'pending' | 'enriching' | 'done' | 'failed' | 'user_provided'>;
+    all_done: boolean;
+    total: number;
+    done_count: number;
+}
+
+export async function getEnrichmentStatus(sessionId: string): Promise<EnrichmentStatusResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/enrichment-status`);
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`enrichment-status failed: ${response.status} ${text}`);
+    }
+    return response.json();
 }
 
 export interface UpdateClassificationResponse {
@@ -433,12 +573,17 @@ export async function selectSystemType(
 export interface ValidationResult {
     mpn: string;
     manufacturer: string | null;
+    quantity: number | null;
     status: 'valid' | 'unresolved';
     confidence: number;
     source: string | null;
     category: string | null;
     description: string | null;
     datasheet_url: string | null;
+    params: Record<string, { display_value?: string | null; value?: string | null; si_value?: string | null; units?: string | null }>;
+    pricing: { per_1000?: number | null };
+    availability: { total_avail?: number | null; lead_time_days?: number | null };
+    candidates: PartCandidate[];
     suggestions: any[];
     message: string;
 }

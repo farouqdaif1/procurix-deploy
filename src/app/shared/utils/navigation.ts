@@ -1,27 +1,29 @@
 /**
- * Maps stage numbers (1-9) to their corresponding routes
+ * Maps stage numbers (1-10) to their corresponding routes
  * 1. Upload & Parse
- * 2. Classification
- * 3. System Analysis
- * 4. Validation
- * 5. Requirements
- * 6. Part Connections
- * 7. Subsystems
- * 8. Subsystem Requirements
- * 9. Status & Finalization
+ * 2. Part Identification
+ * 3. System Identification
+ * 4. Classification (Aux/Non-Aux)
+ * 5. Part Review (Validation)
+ * 6. Requirements
+ * 7. Part Connections / Architecture
+ * 8. Subsystems
+ * 9. Subsystem Requirements
+ * 10. Status & Finalization
  */
 export function getRouteForStage(stageNumber: number): string {
   const stageRouteMap: Record<number, string> = {
-    1: '/upload',           // Upload & Parse
-    2: '/system-identification', // System Identification + HITL (before classification)
-    3: '/part-identification',  // Part Identification (uses confirmed system type)
-    4: '/validate',         // Validation
-    5: '/requirements',     // Requirements
-    6: '/architecture',     // Part Connections
-    7: '/subsystems',       // Subsystems
-    8: '/subsystems?tab=requirements', // Subsystem Requirements
-    9: '/completed',        // Status & Finalization
+    1: '/upload',
+    2: '/part-identification',
+    3: '/system-identification',
+    4: '/classification',
+    5: '/validate',
+    6: '/requirements',
+    7: '/architecture',
+    8: '/subsystems',
+    9: '/subsystems?tab=requirements',
+    10: '/completed',
   };
-  
+
   return stageRouteMap[stageNumber] || '/upload';
 }

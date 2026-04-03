@@ -27,10 +27,10 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
     const stageMap: Record<string, SessionStage> = {
       '/upload': 'upload',
       // '/discovery': 'discovery', // Commented out
-     
       '/part-identification': 'part-identification',
       '/system-identification': 'system-identification',
-       '/validate': 'validate', // Commented out
+      '/classification': 'classification',
+      '/validate': 'validate',
       '/architecture': 'architecture',
       '/requirements': 'requirements',
       '/subsystems': 'subsystems',
@@ -87,10 +87,10 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
       home: '/',
       upload: '/upload',
       // discovery: '/discovery', // Commented out
-  
       'part-identification': '/part-identification',
       'system-identification': '/system-identification',
-       validate: '/validate', // Commented out
+      classification: '/classification',
+      validate: '/validate',
       architecture: '/architecture',
       requirements: '/requirements',
       subsystems: '/subsystems',
@@ -147,10 +147,10 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
               const stageRoutes: Record<string, string> = {
                 upload: '/upload',
                 // discovery: '/discovery', // Commented out
-               
                 'part-identification': '/part-identification',
                 'system-identification': '/system-identification',
-                 validate: '/validate', // Commented out
+                classification: '/classification',
+                validate: '/validate',
                 architecture: '/architecture',
                 requirements: '/requirements',
                 subsystems: '/subsystems',

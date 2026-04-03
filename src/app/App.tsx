@@ -7,6 +7,7 @@ import { UploadPage } from './pages/upload/UploadPage';
 // import { DiscoveryPage } from './pages/discovery/DiscoveryPage';
 import { ValidatePage } from './pages/validate/validatePage';
 import { FundamentalPage } from './pages/fundamental/FundamentalPage';
+import { ClassificationPage } from './pages/classification/ClassificationPage';
 import { AnalysisPage } from './pages/analysis/AnalysisPage';
 import { ArchitecturePage } from './pages/architecture/ArchitecturePage';
 import { RequirementsPage } from './pages/requirements/RequirementsPage';
@@ -24,9 +25,13 @@ export default function App() {
           <Route path="/" element={<LibraryPage />} />
           <Route path="/upload" element={<Layout showStageIndicator={true}><UploadPage /></Layout>} />
           {/* <Route path="/discovery" element={<Layout showStageIndicator={true}><DiscoveryPage /></Layout>} /> */}
+          {/* Step 2: Part Identification (Research + Selection) */}
           <Route path="/part-identification" element={<Layout showStageIndicator={true}><FundamentalPage /></Layout>} />
+          {/* Step 3: System Identification */}
           <Route path="/system-identification" element={<Layout showStageIndicator={true}><AnalysisPage /></Layout>} />
-           <Route path="/validate" element={<Layout showStageIndicator={true}><ValidatePage /></Layout>} />
+          {/* Step 4: Aux/Non-Aux Classification */}
+          <Route path="/classification" element={<Layout showStageIndicator={true}><ClassificationPage /></Layout>} />
+          <Route path="/validate" element={<Layout showStageIndicator={true}><ValidatePage /></Layout>} />
           <Route path="/architecture" element={<Layout showStageIndicator={true}><ArchitecturePage /></Layout>} />
           <Route path="/requirements" element={<Layout showStageIndicator={true}><RequirementsPage /></Layout>} />
           <Route path="/subsystems" element={<Layout showStageIndicator={true}><SubsystemsPage /></Layout>} />
