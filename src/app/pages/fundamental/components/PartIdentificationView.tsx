@@ -507,7 +507,7 @@ function ReviewPhase({
                             <p className="text-xs text-gray-500 mb-2">Select the correct match:</p>
                             {p.candidates!.map((c, i) => (
                               <button
-                                key={c.mpn}
+                                key={`${c.mpn}-${i}`}
                                 onClick={() => setIdentifiedOverrides(prev => ({ ...prev, [p.mpn]: i }))}
                                 className={`w-full text-left rounded-lg border px-3 py-2.5 transition-all ${
                                   selectedIdx === i

@@ -5,7 +5,7 @@ import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight, Rot
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { classifyPartsStream, selectPartMatch, getClassification, bulkUpdateClassification, confirmWebPart, saveCustomPart, suggestPartFields } from '@/app/services/api';
+import { classifyPartsStream, classifyParts, selectPartMatch, getClassification, bulkUpdateClassification, confirmWebPart, saveCustomPart, suggestPartFields } from '@/app/services/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -723,20 +723,63 @@ function ClassifyPhase({ initialParts, onComplete }: {
         </div>
       </div>
 
+      {/* Unclassified queue */}
+      {unclassified.length > 0 && (
+        <div className="shrink-0 border-b bg-yellow-50 px-4 py-3">
+          <p className="text-xs font-semibold text-yellow-700 mb-2 flex items-center gap-1">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Unclassified — assign each part ({unclassified.length} remaining)
+          </p>
+          <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
+            {filterComps(unclassified).map(comp => {
+              const detail = comp.partNumber ? partDetailMap[comp.partNumber] : null;
+              return (
+                <div key={comp.id} className="bg-white border border-yellow-200 rounded-lg px-3 py-2 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono text-xs font-semibold text-gray-900">{comp.partNumber}</span>
+                      {detail && srcBadge(detail.source)}
+                    </div>
+                    {detail?.category && <div className="text-[11px] text-gray-500 truncate">{detail.category}</div>}
+                    {detail?.description && detail.description !== comp.partNumber && (
+                      <div className="text-[11px] text-gray-400 truncate">{detail.description}</div>
+                    )}
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <button
+                      onClick={() => handleMove(comp.id, true)}
+                      className="text-xs bg-blue-600 text-white px-2.5 py-1 rounded-md hover:bg-blue-700 font-medium"
+                    >
+                      Non-Aux
+                    </button>
+                    <button
+                      onClick={() => handleMove(comp.id, false)}
+                      className="text-xs bg-gray-600 text-white px-2.5 py-1 rounded-md hover:bg-gray-700 font-medium"
+                    >
+                      Auxiliary
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Two-pane */}
       <div className="flex-1 overflow-hidden flex gap-0">
         {/* Fundamental */}
         <div className="flex-1 flex flex-col border-r overflow-hidden">
           <div className="shrink-0 px-4 py-2 bg-blue-50 border-b border-blue-100 flex items-center gap-2">
             <Cpu className="h-4 w-4 text-blue-600" />
-            <span className="font-semibold text-sm text-blue-900">Fundamental</span>
+            <span className="font-semibold text-sm text-blue-900">Non-Auxiliary</span>
             <span className="ml-auto text-blue-600 font-bold text-sm">{fundamentalComponents.length}</span>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {filterComps(fundamentalComponents).length === 0 ? (
               <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-sm">
                 <Cpu className="h-8 w-8 mb-2 text-gray-300" />
-                Click auxiliary parts to move here
+                Assign parts above
               </div>
             ) : (
               filterComps(fundamentalComponents).map(comp => (
@@ -757,7 +800,7 @@ function ClassifyPhase({ initialParts, onComplete }: {
             {filterComps(auxiliaryComponents).length === 0 ? (
               <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-sm">
                 <Zap className="h-8 w-8 mb-2 text-gray-300" />
-                Click fundamental parts to move here
+                Assign parts above
               </div>
             ) : (
               filterComps(auxiliaryComponents).map(comp => (
@@ -824,30 +867,42 @@ export function FundamentalClassificationView({
   const [loading, setLoading] = useState(forceClassifyPhase);
 
   // Load classification data on mount.
-  // When forceClassifyPhase=true (Classification page), always load and go straight to classify.
+  // When forceClassifyPhase=true: load existing data. If all parts are unclassified,
+  // auto-run the AI classification agent first (POST /classify), then reload.
   // When in normal mode, skip research if already classified.
   useEffect(() => {
     if (!sessionId) return;
-    getClassification(sessionId)
-      .then(result => {
+
+    const load = async () => {
+      try {
+        const result = await getClassification(sessionId);
         if (result.parts?.length) {
-          setEnrichedParts(result.parts);
           if (forceClassifyPhase) {
+            // Check if all null — run AI classification agent first
+            const allNull = Object.values(result.classification_map).every(v => v === null);
+            if (allNull) {
+              // Auto-classify via agent, then reload
+              await classifyParts(sessionId);
+              const refreshed = await getClassification(sessionId);
+              setEnrichedParts(refreshed.parts ?? []);
+            } else {
+              setEnrichedParts(result.parts);
+            }
             setPhase('classify');
           } else {
+            setEnrichedParts(result.parts);
             const allNull = Object.values(result.classification_map).every(v => v === null);
-            if (!allNull) {
-              setPhase('classify');
-            }
+            if (!allNull) setPhase('classify');
           }
         }
-      })
-      .catch(() => {
+      } catch {
         // 404 or error — stay on current phase
-      })
-      .finally(() => {
+      } finally {
         if (forceClassifyPhase) setLoading(false);
-      });
+      }
+    };
+
+    load();
   }, [sessionId, refreshTrigger, forceClassifyPhase]);
 
   if (!sessionId) {
@@ -863,7 +918,8 @@ export function FundamentalClassificationView({
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-3" />
-          <p className="text-sm text-gray-500">Loading parts…</p>
+          <p className="text-sm text-gray-600 font-medium">Classifying parts…</p>
+          <p className="text-xs text-gray-400 mt-1">AI agent is assigning auxiliary / non-auxiliary based on the system</p>
         </div>
       </div>
     );
