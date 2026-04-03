@@ -632,6 +632,7 @@ export interface Requirement {
     description: string;
     category: string;
     bom_reference: string[];
+    specification?: string;
 }
 
 export interface RequirementsResponse {
@@ -678,6 +679,7 @@ export interface UpdateRequirementResponse {
         description: string;
         category: string;
         bom_reference: string[];
+        specification?: string;
     };
 }
 

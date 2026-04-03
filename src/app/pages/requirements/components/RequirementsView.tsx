@@ -10,9 +10,9 @@ interface Requirement {
   category: string;
   title: string;
   description: string;
-  value: string;
+  value: string;       // specification text
   confidence: number;
-  source: string[];
+  source: string[];    // bom_reference MPNs
   isEditing?: boolean;
 }
 
@@ -85,9 +85,9 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
           category: req.category,
           title: req.original_req_id,
           description: req.description,
-          value: req.bom_reference.join(', '), // Use BOM references as value
-          confidence: 100, // API doesn't provide confidence, default to 100
-          source: req.bom_reference, // Use BOM references as source
+          value: req.specification || req.bom_reference.join(', '),
+          confidence: 100,
+          source: req.bom_reference,
           isEditing: false,
         }));
 
@@ -149,7 +149,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
                 ...req, 
                 title: updates.title || req.title,
                 description: updates.description || req.description,
-                value: result.requirement.bom_reference.join(', '),
+                value: result.requirement.specification || result.requirement.bom_reference.join(', '),
                 source: result.requirement.bom_reference,
                 isEditing: false
               } 
@@ -783,7 +783,7 @@ function RequirementCard({ requirement, onEdit, onSaveEdit, onCancelEdit, isSavi
               <div className="text-xs font-medium text-gray-600 mb-1">
                 Specification
               </div>
-              <div className="text-sm font-mono text-gray-900">
+              <div className="text-sm font-mono text-gray-900 whitespace-pre-wrap">
                 {requirement.value}
               </div>
             </div>
