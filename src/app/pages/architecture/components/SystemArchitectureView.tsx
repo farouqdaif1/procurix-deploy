@@ -67,10 +67,13 @@ const nodeTypes = {
 // Default connection type colors
 const defaultConnectionTypeColors: Record<string, string> = {
     power: '#ef4444', // red
+    power_supply: '#ef4444', // alias: AI generates this → same as power
     switching: '#f59e0b', // amber/orange for switching signals
     power_and_feedback: '#8b5cf6', // purple for combined power/feedback
     signal: '#3b82f6', // blue
+    reference: '#3b82f6', // alias: AI generates this → same as signal
     data: '#8b5cf6', // purple
+    bus: '#8b5cf6', // alias: AI generates this → same as data
     analog: '#f59e0b', // amber
     differential: '#ec4899', // pink
     clock: '#10b981', // green
@@ -151,10 +154,10 @@ const getEdgeStyle = (type: string) => {
   // Apply different line styles based on connection type
   switch (type) {
     case 'power':
+    case 'power_supply': // AI alias
       return {
         ...baseStyle,
         strokeWidth: 3,
-        // No strokeDasharray = solid line
       };
     case 'switching':
       return {
@@ -169,12 +172,13 @@ const getEdgeStyle = (type: string) => {
         strokeDasharray: '10,5', // dashed line
       };
     case 'signal':
+    case 'reference': // AI alias
       return {
         ...baseStyle,
         strokeWidth: 3,
-        // No strokeDasharray = solid line
       };
     case 'data':
+    case 'bus': // AI alias
       return {
         ...baseStyle,
         strokeWidth: 3,

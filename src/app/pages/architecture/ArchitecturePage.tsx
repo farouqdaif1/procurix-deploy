@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { SystemArchitectureView } from './components/SystemArchitectureView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { analyzeConnections, getConnections, updateCurrentStageInContext, type Connection } from '@/app/services/api';
+import { analyzeConnections, getConnections, saveConnections, updateCurrentStageInContext, type Connection } from '@/app/services/api';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
 import type { Component } from '@/app/types';
 
@@ -100,6 +100,11 @@ export function ArchitecturePage() {
             // "direct" maps to "signal", other types are used as-is if valid
             const connectionTypeMap: Record<string, string> = {
               'direct': 'signal',
+              // AI-generated types (connections agent)
+              'power_supply': 'power',   // AI uses power_supply → maps to power
+              'bus': 'data',             // AI uses bus (I2C/SPI/UART) → maps to data
+              'reference': 'signal',     // AI uses reference (voltage/clock ref) → maps to signal
+              // Frontend canonical types
               'power': 'power',
               'signal': 'signal',
               'data': 'data',
@@ -139,19 +144,39 @@ export function ArchitecturePage() {
     fetchConnections();
   }, [contextSessionId, querySessionId, updateParams]);
 
-  const handleArchitectureComplete = async () => {
+  const handleArchitectureComplete = async (
+    _blocks: any[],
+    updatedConnections: any[],
+  ) => {
     const activeSessionId = contextSessionId || querySessionId;
-    
-    // Update current stage when user explicitly completes architecture step
+
+    // Persist the user-corrected connections to bom_part_connections (source of truth)
+    if (activeSessionId && updatedConnections.length > 0) {
+      try {
+        const payload = updatedConnections
+          .filter((c) => c.from && c.to)
+          .map((c) => ({
+            source_part: c.from,
+            target_part: c.to,
+            connection_type: c.type || c.connection_type || 'signal',
+          }));
+        await saveConnections(activeSessionId, payload);
+      } catch (error) {
+        console.error('Error saving connections:', error);
+        toast.error('Failed to save connection changes');
+        return;
+      }
+    }
+
+    // Update current stage
     if (activeSessionId && setCurrentStage) {
       try {
         await updateCurrentStageInContext(activeSessionId, setCurrentStage);
       } catch (error) {
         console.error('Error updating stage after architecture completion:', error);
-        // Don't block navigation if stage update fails
       }
     }
-    
+
     toast.success('System architecture defined!');
     if (activeSessionId) {
       navigate(`/subsystems?session=${activeSessionId}`);

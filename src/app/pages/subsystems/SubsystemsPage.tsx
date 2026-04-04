@@ -4,7 +4,7 @@ import { SubsystemsView } from './components/SubsystemsView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
-import { getSubsystems, generateSubsystems, getConnections, getRequirementsGET, type Connection } from '@/app/services/api';
+import { getSubsystems, generateSubsystems, getConnections, getSubsystemConnections, getRequirementsGET, type Connection, type SubsystemConnection } from '@/app/services/api';
 import type { Component, Subsystem, Requirement } from '@/app/types';
 
 export function SubsystemsPage() {
@@ -15,6 +15,7 @@ export function SubsystemsPage() {
   const [components, setComponents] = useState<Component[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [subsystemConnections, setSubsystemConnections] = useState<SubsystemConnection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -121,17 +122,20 @@ export function SubsystemsPage() {
 
         setComponents(componentsList);
 
-        // 3. Optionally fetch connections for additional component data
+        // 3. Fetch part-level connections + subsystem-level connections
         try {
-          const connectionsResponse = await getConnections(activeSessionId, activeSessionId);
-          // Connections can be used for additional component relationships if needed
+          const [connectionsResponse, subsystemConnsResponse] = await Promise.all([
+            getConnections(activeSessionId, activeSessionId),
+            getSubsystemConnections(activeSessionId),
+          ]);
           if (connectionsResponse?.connections) {
-            console.log('Connections available:', connectionsResponse.connections.length);
             setConnections(connectionsResponse.connections);
           }
+          if (subsystemConnsResponse?.subsystem_connections) {
+            setSubsystemConnections(subsystemConnsResponse.subsystem_connections);
+          }
         } catch (connError: any) {
-          // Connections are optional, continue without them
-          console.log('Connections not available, using components from bom_reference only');
+          console.log('Connections not available:', connError.message);
         }
 
         // 3. Fetch requirements and map to frontend Requirement type
@@ -213,6 +217,7 @@ export function SubsystemsPage() {
       components={components}
       requirements={requirements}
       connections={connections}
+      subsystemConnections={subsystemConnections}
       onComplete={handleComplete}
       onAddRequirements={() => {}}
       sessionId={activeSessionId || ''}

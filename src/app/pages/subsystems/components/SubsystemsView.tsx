@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Subsystem, Component, Requirement } from '@/app/types';
-import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, type SubsystemRequirementItem, type Connection as APIConnection } from '@/app/services/api';
+import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, type SubsystemRequirementItem, type Connection as APIConnection, type SubsystemConnection } from '@/app/services/api';
 import { SubsystemDiagramView } from './SubsystemDiagramView';
 import { 
   Grid3x3, 
@@ -38,6 +38,7 @@ interface SubsystemsViewProps {
   components: Component[];
   requirements: Requirement[];
   connections: APIConnection[];
+  subsystemConnections?: SubsystemConnection[];
   onComplete: () => void;
   onAddRequirements: (newRequirements: Requirement[]) => void;
   sessionId: string;
@@ -54,7 +55,7 @@ interface SubsystemRequirement {
   category: string;
 }
 
-export function SubsystemsView({ subsystems, components, requirements, connections, onComplete, onAddRequirements, sessionId }: SubsystemsViewProps) {
+export function SubsystemsView({ subsystems, components, requirements, connections, subsystemConnections = [], onComplete, onAddRequirements, sessionId }: SubsystemsViewProps) {
   const [selectedSubsystem, setSelectedSubsystem] = useState<Subsystem | null>(null);
   const [subsystemDetails, setSubsystemDetails] = useState<any>(null);
   const [subsystemRequirements, setSubsystemRequirements] = useState<Record<string, SubsystemRequirement[]>>({});
@@ -1437,6 +1438,7 @@ export function SubsystemsView({ subsystems, components, requirements, connectio
               allSubsystems={subsystems}
               allComponents={components}
               connections={connections}
+              subsystemConnections={subsystemConnections}
             />
           </div>
         </div>

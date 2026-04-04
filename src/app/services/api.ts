@@ -932,6 +932,36 @@ export async function getConnections(sessionId: string, bomId: string): Promise<
     return response.json();
 }
 
+export interface SubsystemConnection {
+    source_subsystem_id: string;
+    target_subsystem_id: string;
+    connection_types: string[];
+    primary_type: string;
+    part_connection_count: number;
+}
+
+export async function getSubsystemConnections(sessionId: string): Promise<{ success: boolean; subsystem_connections: SubsystemConnection[] }> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystem-connections`);
+    if (!response.ok) throw new Error(`Failed to get subsystem connections: ${response.status}`);
+    return response.json();
+}
+
+export async function saveConnections(
+    sessionId: string,
+    connections: Array<{ source_part: string; target_part: string; connection_type: string }>
+): Promise<{ success: boolean; connections_saved: number }> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/connections`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connections }),
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to save connections: ${response.status} ${errorText}`);
+    }
+    return response.json();
+}
+
 export interface Subsystem {
     id: string;
     name: string;
