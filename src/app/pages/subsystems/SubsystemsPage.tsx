@@ -35,18 +35,18 @@ export function SubsystemsPage() {
 
   // Fetch subsystems, components, and requirements from API
   useEffect(() => {
+    let isCurrent = true; // guard against stale concurrent fetches
+
     const fetchData = async () => {
       const activeSessionId = contextSessionId || querySessionId;
-      
+
       if (!activeSessionId) {
-        setError('No session ID available');
-        setIsLoading(false);
+        if (isCurrent) { setError('No session ID available'); setIsLoading(false); }
         return;
       }
 
       try {
-        setIsLoading(true);
-        setError(null);
+        if (isCurrent) { setIsLoading(true); setError(null); }
         
         // Update URL with session query param
         updateParams(activeSessionId);
@@ -82,52 +82,40 @@ export function SubsystemsPage() {
           complianceScore: undefined, // Not provided by API
         }));
 
+        if (!isCurrent) return;
         setSubsystems(mappedSubsystems);
 
         // 2. Create components from subsystems' bom_reference
-        // Extract all unique part numbers from all subsystems' bom_reference arrays
         const uniqueParts = new Set<string>();
         subsystemsResponse.subsystems.forEach((subsystem) => {
           subsystem.bom_reference.forEach((partNumber) => {
-            if (partNumber) {
-              uniqueParts.add(partNumber);
-            }
+            if (partNumber) uniqueParts.add(partNumber);
           });
         });
 
-        // Create Component objects from part numbers in bom_reference
-        // These components will be rendered inside their respective subsystem groups
         const componentsList: Component[] = Array.from(uniqueParts).map((partNumber) => ({
-          id: partNumber, // Use part number as ID to match with subsystem.componentIds (which contains bom_reference)
+          id: partNumber,
           reference: partNumber,
           partNumber: partNumber,
           type: 'component',
-          description: partNumber, // Use part number as description
+          description: partNumber,
           specs: {},
           isIdentified: true,
           isGeneric: false,
           complianceStatus: 'unknown' as const,
         }));
 
-        console.log('Created components from bom_reference:', {
-          totalComponents: componentsList.length,
-          components: componentsList.map(c => c.id),
-          subsystems: mappedSubsystems.map(s => ({
-            id: s.id,
-            name: s.name,
-            componentIds: s.componentIds,
-            componentCount: s.componentIds.length
-          }))
-        });
-
+        if (!isCurrent) return;
         setComponents(componentsList);
 
         // 3. Fetch part-level connections + subsystem-level connections
+        // Both fetched AFTER subsystems are committed so bom_reference is populated
         try {
           const [connectionsResponse, subsystemConnsResponse] = await Promise.all([
             getConnections(activeSessionId, activeSessionId),
             getSubsystemConnections(activeSessionId),
           ]);
+          if (!isCurrent) return;
           if (connectionsResponse?.connections) {
             setConnections(connectionsResponse.connections);
           }
@@ -138,30 +126,30 @@ export function SubsystemsPage() {
           console.log('Connections not available:', connError.message);
         }
 
-        // 3. Fetch requirements and map to frontend Requirement type
+        // 4. Fetch requirements
         try {
           const requirementsResponse = await getRequirementsGET(activeSessionId);
-          // Map API Requirement format to frontend Requirement format
           const mappedRequirements: Requirement[] = (requirementsResponse.requirements || []).map((apiReq) => ({
             id: apiReq.req_id,
             code: apiReq.original_req_id || apiReq.req_id,
-            title: apiReq.description.split('.')[0] || apiReq.description, // Use first sentence as title
+            title: apiReq.description.split('.')[0] || apiReq.description,
             description: apiReq.description,
-            priority: 'medium' as const, // Default priority since API doesn't provide it
+            priority: 'medium' as const,
             category: apiReq.category,
             validationType: 'boolean' as const,
-            isPassed: true, // Default value
+            isPassed: true,
             affectedComponents: apiReq.bom_reference || [],
           }));
+          if (!isCurrent) return;
           setRequirements(mappedRequirements);
         } catch (reqError: any) {
           console.warn('Failed to fetch requirements:', reqError);
-          // Requirements are optional, continue without them
-          setRequirements([]);
+          if (isCurrent) setRequirements([]);
         }
 
-        setIsLoading(false);
+        if (isCurrent) setIsLoading(false);
       } catch (err) {
+        if (!isCurrent) return;
         const errorMessage = err instanceof Error ? err.message : 'Failed to fetch subsystems data';
         setError(errorMessage);
         toast.error(errorMessage);
@@ -170,6 +158,7 @@ export function SubsystemsPage() {
     };
 
     fetchData();
+    return () => { isCurrent = false; };
   }, [contextSessionId, querySessionId, updateParams]);
 
   const handleComplete = () => {
