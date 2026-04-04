@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Subsystem, Component, Requirement } from '@/app/types';
-import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, type SubsystemRequirementItem } from '@/app/services/api';
+import { getSubsystemDetails, getSubsystemRequirementsBySubsystemId, generateSubsystemRequirements, createSubsystemRequirement, type SubsystemRequirementItem, type Connection as APIConnection } from '@/app/services/api';
+import { SubsystemDiagramView } from './SubsystemDiagramView';
 import { 
   Grid3x3, 
   ChevronRight, 
@@ -36,6 +37,7 @@ interface SubsystemsViewProps {
   subsystems: Subsystem[];
   components: Component[];
   requirements: Requirement[];
+  connections: APIConnection[];
   onComplete: () => void;
   onAddRequirements: (newRequirements: Requirement[]) => void;
   sessionId: string;
@@ -52,7 +54,7 @@ interface SubsystemRequirement {
   category: string;
 }
 
-export function SubsystemsView({ subsystems, components, requirements, onComplete, onAddRequirements, sessionId }: SubsystemsViewProps) {
+export function SubsystemsView({ subsystems, components, requirements, connections, onComplete, onAddRequirements, sessionId }: SubsystemsViewProps) {
   const [selectedSubsystem, setSelectedSubsystem] = useState<Subsystem | null>(null);
   const [subsystemDetails, setSubsystemDetails] = useState<any>(null);
   const [subsystemRequirements, setSubsystemRequirements] = useState<Record<string, SubsystemRequirement[]>>({});
@@ -144,35 +146,25 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
               [selectedSubsystem.id]: [],
             }));
           } else if ('requirements' in requirementsResponse && Array.isArray(requirementsResponse.requirements)) {
-            // New format: direct requirements array
-            // Filter to ensure requirements belong to this specific subsystem
-            const subsystemReqs = requirementsResponse.requirements.filter(
-              (req: any) => req.subsystem_id === selectedSubsystem.id
-            );
-            
-            // Check if requirements array is empty
-            if (subsystemReqs.length === 0) {
+            // Backend already scoped by subsystem_id — use all returned requirements
+            const reqs = requirementsResponse.requirements;
+
+            if (reqs.length === 0) {
               setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: true }));
-              setSubsystemRequirements(prev => ({
-                ...prev,
-                [selectedSubsystem.id]: [],
-              }));
+              setSubsystemRequirements(prev => ({ ...prev, [selectedSubsystem.id]: [] }));
             } else {
-              // Map API requirements to SubsystemRequirement format
-              // Always use selectedSubsystem.id to ensure correct association
-              const mappedRequirements: SubsystemRequirement[] = subsystemReqs.map((req: any) => ({
+              const mappedRequirements: SubsystemRequirement[] = reqs.map((req: any) => ({
                 id: req.req_id,
-                subsystemId: selectedSubsystem.id, // Use selected subsystem ID, not API's subsystem_id
+                subsystemId: selectedSubsystem.id,
                 title: req.description,
-                description: req.criteria,
+                description: typeof req.criteria === 'object'
+                  ? JSON.stringify(req.criteria)
+                  : (req.criteria || ''),
                 priority: (req.priority || 'medium') as SubsystemRequirementPriority,
                 category: 'Functional',
               }));
 
-              setSubsystemRequirements(prev => ({
-                ...prev,
-                [selectedSubsystem.id]: mappedRequirements,
-              }));
+              setSubsystemRequirements(prev => ({ ...prev, [selectedSubsystem.id]: mappedRequirements }));
               setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: false }));
             }
           } else if ('subsystem_requirements' in requirementsResponse) {
@@ -199,9 +191,11 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 // Always use selectedSubsystem.id to ensure correct association
                 const mappedRequirements: SubsystemRequirement[] = filteredReqs.map((req: any) => ({
                   id: req.req_id || req.id,
-                  subsystemId: selectedSubsystem.id, // Use selected subsystem ID
+                  subsystemId: selectedSubsystem.id,
                   title: req.description || req.title,
-                  description: req.criteria || req.description,
+                  description: typeof req.criteria === 'object' && req.criteria !== null
+                    ? JSON.stringify(req.criteria)
+                    : (req.criteria || req.description || ''),
                   priority: (req.priority || 'medium') as SubsystemRequirementPriority,
                   category: req.category || 'Functional',
                 }));
@@ -627,55 +621,41 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                         );
                       }
                       
-                      if (subsystemReqs && subsystemReqs.length > 0) {
-                        // Filter to ensure requirements belong to this specific subsystem
-                        const filteredReqs = subsystemReqs.filter(
-                          (req: SubsystemRequirementItem) => req.subsystem_id === selectedSubsystem.id
-                        );
-                        
-                        // Map API requirements to SubsystemRequirement format
-                        // Always use selectedSubsystem.id to ensure correct association
-                        const mappedRequirements: SubsystemRequirement[] = filteredReqs.map((req) => ({
-                          id: req.req_id,
-                          subsystemId: selectedSubsystem.id, // Use selected subsystem ID, not API's subsystem_id
-                          title: req.description,
-                          description: req.criteria,
-                          priority: (req.priority || 'medium') as SubsystemRequirementPriority,
-                          category: 'Functional', // Default category since not provided in API response
-                        }));
+                      // Backend already filters by subsystem_id — use all returned requirements
+                      const mappedRequirements: SubsystemRequirement[] = subsystemReqs.map((req) => ({
+                        id: req.req_id,
+                        subsystemId: selectedSubsystem.id,
+                        title: req.description,
+                        description: typeof req.criteria === 'object'
+                          ? JSON.stringify(req.criteria)
+                          : (req.criteria || ''),
+                        priority: (req.priority || 'medium') as SubsystemRequirementPriority,
+                        category: 'Functional',
+                      }));
 
-                        // Update local subsystem requirements state
+                      if (mappedRequirements.length > 0) {
                         setSubsystemRequirements(prev => ({
                           ...prev,
                           [selectedSubsystem.id]: mappedRequirements,
                         }));
 
-                        // Map to Requirement format for parent state
-                        const fullRequirements: Requirement[] = subsystemReqs.map((req) => ({
-                          id: req.req_id,
-                          code: `REQ-${req.req_id.slice(0, 8).toUpperCase()}`,
-                          title: req.description,
-                          description: req.criteria,
-                          priority: (req.priority || 'medium') as 'critical' | 'high' | 'mandatory' | 'medium' | 'low',
+                        const fullRequirements: Requirement[] = mappedRequirements.map((req) => ({
+                          id: req.id,
+                          code: `REQ-${req.id.slice(0, 8).toUpperCase()}`,
+                          title: req.title,
+                          description: req.description,
+                          priority: req.priority as 'critical' | 'high' | 'mandatory' | 'medium' | 'low',
                           category: 'Functional',
                           validationType: 'threshold' as const,
                           isPassed: true,
-                          affectedComponents: req.mapped_components,
+                          affectedComponents: subsystemReqs.find(r => r.req_id === req.id)?.mapped_components || [],
                         }));
 
-                        // Update parent state with full requirements
                         onAddRequirements(fullRequirements);
-
-                        // Clear requirements not found flag
-                        setRequirementsNotFound(prev => ({
-                      ...prev,
-                          [selectedSubsystem.id]: false,
-                    }));
-                    
-                        toast.success(`Generated ${mappedRequirements.length} smart requirements for ${selectedSubsystem.name}`, {
-                      description: `AI analyzed ${subsystemComps.length} components and created comprehensive specs`
-                    });
+                        setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: false }));
+                        toast.success(`Generated ${mappedRequirements.length} requirements for ${selectedSubsystem.name}`);
                       } else {
+                        setRequirementsNotFound(prev => ({ ...prev, [selectedSubsystem.id]: true }));
                         toast.warning(`No requirements were generated for ${selectedSubsystem.name}`);
                       }
                     } catch (error) {
@@ -1450,6 +1430,14 @@ export function SubsystemsView({ subsystems, components, requirements, onComplet
                 )}
               </motion.div>
             )}
+
+            {/* Subsystem Architecture Diagram */}
+            <SubsystemDiagramView
+              selectedSubsystem={selectedSubsystem}
+              allSubsystems={subsystems}
+              allComponents={components}
+              connections={connections}
+            />
           </div>
         </div>
 

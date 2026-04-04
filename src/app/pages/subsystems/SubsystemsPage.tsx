@@ -4,7 +4,7 @@ import { SubsystemsView } from './components/SubsystemsView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
-import { getSubsystems, generateSubsystems, getConnections, getRequirementsGET } from '@/app/services/api';
+import { getSubsystems, generateSubsystems, getConnections, getRequirementsGET, type Connection } from '@/app/services/api';
 import type { Component, Subsystem, Requirement } from '@/app/types';
 
 export function SubsystemsPage() {
@@ -14,6 +14,7 @@ export function SubsystemsPage() {
   const [subsystems, setSubsystems] = useState<Subsystem[]>([]);
   const [components, setComponents] = useState<Component[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [connections, setConnections] = useState<Connection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,6 +127,7 @@ export function SubsystemsPage() {
           // Connections can be used for additional component relationships if needed
           if (connectionsResponse?.connections) {
             console.log('Connections available:', connectionsResponse.connections.length);
+            setConnections(connectionsResponse.connections);
           }
         } catch (connError: any) {
           // Connections are optional, continue without them
@@ -210,6 +212,7 @@ export function SubsystemsPage() {
       subsystems={subsystems}
       components={components}
       requirements={requirements}
+      connections={connections}
       onComplete={handleComplete}
       onAddRequirements={() => {}}
       sessionId={activeSessionId || ''}

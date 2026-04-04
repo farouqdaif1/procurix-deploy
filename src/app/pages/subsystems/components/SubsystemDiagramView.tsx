@@ -1,0 +1,497 @@
+import { useMemo, useEffect, useState } from 'react';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  type Edge,
+  type Node,
+  MarkerType,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import type { Subsystem, Component } from '@/app/types';
+import type { Connection as APIConnection } from '@/app/services/api';
+import { Focus, Network } from 'lucide-react';
+import { ComponentNode } from '../../architecture/components/ComponentNode';
+import { CustomEdge } from '../../architecture/components/CustomEdge';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface SubsystemDiagramViewProps {
+  selectedSubsystem: Subsystem;
+  allSubsystems: Subsystem[];
+  allComponents: Component[];
+  connections: APIConnection[];
+}
+
+type DiagramMode = 'isolated' | 'context';
+
+// ─── Edge Styling (mirrors SystemArchitectureView) ────────────────────────────
+
+const defaultConnectionTypeColors: Record<string, string> = {
+  power: '#ef4444',
+  switching: '#f59e0b',
+  power_and_feedback: '#8b5cf6',
+  signal: '#3b82f6',
+  data: '#8b5cf6',
+  analog: '#f59e0b',
+  differential: '#ec4899',
+  clock: '#10b981',
+  ground: '#6b7280',
+  feedback: '#9333ea',
+  control: '#06b6d4',
+};
+
+const getEdgeColor = (type: string): string => {
+  const t = (type || '').toLowerCase();
+  return defaultConnectionTypeColors[t] || '#6b7280';
+};
+
+const getEdgeStyle = (type: string): React.CSSProperties => {
+  const color = getEdgeColor(type);
+  const base: React.CSSProperties = { stroke: color, zIndex: 1 };
+  const t = (type || '').toLowerCase();
+  switch (t) {
+    case 'power':            return { ...base, strokeWidth: 3 };
+    case 'switching':        return { ...base, strokeWidth: 5 };
+    case 'power_and_feedback': return { ...base, strokeWidth: 4, strokeDasharray: '10,5' };
+    case 'signal':           return { ...base, strokeWidth: 3 };
+    case 'data':             return { ...base, strokeWidth: 3, strokeDasharray: '5,5' };
+    case 'analog':           return { ...base, strokeWidth: 3, strokeDasharray: '8,4' };
+    case 'differential':     return { ...base, strokeWidth: 3, strokeDasharray: '3,3' };
+    case 'clock':            return { ...base, strokeWidth: 3, strokeDasharray: '12,4,4,4' };
+    case 'ground':           return { ...base, strokeWidth: 4, strokeDasharray: '15,5' };
+    case 'feedback':         return { ...base, strokeWidth: 3, strokeDasharray: '6,6' };
+    case 'control':          return { ...base, strokeWidth: 3, strokeDasharray: '4,4' };
+    default:                 return { ...base, strokeWidth: 2 };
+  }
+};
+
+// ─── Node / Edge Types ────────────────────────────────────────────────────────
+
+const nodeTypes = {
+  component: ComponentNode as any,
+};
+
+const edgeTypes = {
+  smoothstep: (props: any) => <CustomEdge {...props} />,
+  default: (props: any) => <CustomEdge {...props} />,
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function compById(allComponents: Component[], mpn: string): Component {
+  return (
+    allComponents.find((c) => c.id === mpn || c.partNumber === mpn) ?? {
+      id: mpn,
+      reference: mpn,
+      partNumber: mpn,
+      type: 'COMPONENT',
+      description: mpn,
+      specs: {},
+      isIdentified: false,
+      isGeneric: false,
+      complianceStatus: 'unknown' as const,
+    }
+  );
+}
+
+function makeComponentNode(
+  comp: Component,
+  position: { x: number; y: number },
+  extra?: Partial<Node>,
+): Node {
+  return {
+    id: comp.id,
+    type: 'component',
+    position,
+    data: comp as any,
+    ...extra,
+  };
+}
+
+function makeEdge(
+  id: string,
+  source: string,
+  target: string,
+  connectionType: string,
+  label?: string,
+): Edge {
+  const color = getEdgeColor(connectionType);
+  return {
+    id,
+    source,
+    target,
+    type: 'smoothstep',
+    label: connectionType,
+    labelStyle: { fontSize: 9, fill: color, fontWeight: 600 },
+    labelBgStyle: { fill: 'white', fillOpacity: 0.85 },
+    style: getEdgeStyle(connectionType),
+    markerEnd: { type: MarkerType.ArrowClosed, color },
+    animated: connectionType === 'switching',
+  } as Edge;
+}
+
+// ─── Build: Isolated Layout ───────────────────────────────────────────────────
+
+const NODE_W = 300;
+const COLS_GAP = 360;
+const ROWS_GAP = 220;
+
+function buildIsolatedLayout(
+  selectedSubsystem: Subsystem,
+  allSubsystems: Subsystem[],
+  allComponents: Component[],
+  connections: APIConnection[],
+): { nodes: Node[]; edges: Edge[] } {
+  const compIds = selectedSubsystem.componentIds;
+  const compSet = new Set(compIds);
+  const cols = Math.max(1, Math.ceil(Math.sqrt(compIds.length)));
+
+  // Component nodes for this subsystem
+  const compNodes: Node[] = compIds.map((mpn, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    return makeComponentNode(compById(allComponents, mpn), {
+      x: 60 + col * COLS_GAP,
+      y: 60 + row * ROWS_GAP,
+    });
+  });
+
+  // Internal edges
+  const internalEdges: Edge[] = connections
+    .filter((c) => c.target_part && compSet.has(c.source_part) && compSet.has(c.target_part!))
+    .map((c, i) =>
+      makeEdge(
+        `int_${i}_${c.source_part}_${c.target_part}`,
+        c.source_part,
+        c.target_part!,
+        c.connection_type,
+      ),
+    );
+
+  // External stubs — one stub per owning subsystem, or per part if subsystem unknown
+  type StubEntry = { direction: 'outgoing' | 'incoming'; label: string; rep: APIConnection };
+  const stubMap = new Map<string, StubEntry>();
+
+  connections.forEach((c) => {
+    if (!c.target_part) return;
+    const srcIn = compSet.has(c.source_part);
+    const tgtIn = compSet.has(c.target_part);
+    if (srcIn === tgtIn) return; // both internal or both external — skip
+
+    const externalMpn = srcIn ? c.target_part : c.source_part;
+    const direction: 'outgoing' | 'incoming' = srcIn ? 'outgoing' : 'incoming';
+    const arrow = direction === 'outgoing' ? '↗' : '↙';
+
+    // Group by owning subsystem if known, otherwise by part number
+    const ownerSub = allSubsystems.find(
+      (s) => s.id !== selectedSubsystem.id && s.componentIds.includes(externalMpn),
+    );
+    const stubKey = ownerSub ? `sub_${ownerSub.id}` : `part_${externalMpn}`;
+    const label = ownerSub
+      ? `${arrow} ${ownerSub.name}`
+      : `${arrow} ${externalMpn}`;
+
+    if (!stubMap.has(stubKey)) {
+      stubMap.set(stubKey, { direction, label, rep: c });
+    }
+  });
+
+  const maxCompX = compIds.length > 0
+    ? 60 + (Math.min(cols - 1, compIds.length - 1)) * COLS_GAP + NODE_W
+    : 60 + NODE_W;
+
+  const stubNodes: Node[] = [];
+  const stubEdges: Edge[] = [];
+  let outIdx = 0;
+  let inIdx = 0;
+
+  stubMap.forEach((entry, stubKey) => {
+    const isOut = entry.direction === 'outgoing';
+    const idx = isOut ? outIdx++ : inIdx++;
+    const stubX = isOut ? maxCompX + 80 : -340;
+    const stubY = idx * 140;
+    const stubId = `stub_${stubKey}`;
+    const color = getEdgeColor(entry.rep.connection_type);
+
+    stubNodes.push({
+      id: stubId,
+      type: 'default',
+      position: { x: stubX, y: stubY },
+      data: { label: entry.label },
+      style: {
+        background: '#f9fafb',
+        border: `2px dashed ${color}`,
+        borderRadius: 8,
+        fontSize: 11,
+        color: '#6b7280',
+        width: 200,
+        padding: '8px 12px',
+      },
+    });
+
+    const rep = entry.rep;
+    const internalMpn = isOut ? rep.source_part : rep.target_part!;
+    stubEdges.push(
+      makeEdge(
+        `stub_edge_${stubKey}`,
+        isOut ? internalMpn : stubId,
+        isOut ? stubId : internalMpn,
+        rep.connection_type,
+      ),
+    );
+  });
+
+  return {
+    nodes: [...compNodes, ...stubNodes],
+    edges: [...internalEdges, ...stubEdges],
+  };
+}
+
+// ─── Build: Context Layout ────────────────────────────────────────────────────
+// Uses absolute positioning (no parentId) so cross-subsystem edges always render.
+// Group background panels are non-interactive default nodes placed behind components.
+
+const COMPS_PER_ROW = 3;
+const GROUP_PADDING = 50;
+const SUBSYSTEM_SPACING_X = 1300;
+
+function buildContextLayout(
+  selectedSubsystem: Subsystem,
+  allSubsystems: Subsystem[],
+  allComponents: Component[],
+  connections: APIConnection[],
+): { nodes: Node[]; edges: Edge[] } {
+  const groupNodes: Node[] = [];
+  const compNodes: Node[] = [];
+
+  const cols = Math.max(1, Math.ceil(Math.sqrt(allSubsystems.length)));
+
+  // Track absolute positions for each group so component nodes can be placed absolutely
+  const groupOffsets: { gx: number; gy: number; groupHeight: number }[] = [];
+
+  // First pass — compute group heights so rows stack correctly
+  const groupHeights = allSubsystems.map((sub) => {
+    const numCompRows = Math.max(1, Math.ceil(sub.componentIds.length / COMPS_PER_ROW));
+    return numCompRows * ROWS_GAP + GROUP_PADDING * 2 + 50;
+  });
+
+  // Max height per row of subsystems
+  const rowHeights: number[] = [];
+  allSubsystems.forEach((_, idx) => {
+    const row = Math.floor(idx / cols);
+    rowHeights[row] = Math.max(rowHeights[row] || 0, groupHeights[idx]);
+  });
+
+  const rowOffsets: number[] = [50];
+  rowHeights.forEach((h, i) => {
+    rowOffsets[i + 1] = rowOffsets[i] + h + 80;
+  });
+
+  allSubsystems.forEach((sub, subIdx) => {
+    const isSelected = sub.id === selectedSubsystem.id;
+    const col = subIdx % cols;
+    const row = Math.floor(subIdx / cols);
+
+    const numCompRows = Math.max(1, Math.ceil(sub.componentIds.length / COMPS_PER_ROW));
+    const actualCols = Math.min(sub.componentIds.length, COMPS_PER_ROW);
+    const groupWidth = Math.max(420, actualCols * COLS_GAP + GROUP_PADDING * 2);
+    const groupHeight = groupHeights[subIdx];
+
+    const gx = col * SUBSYSTEM_SPACING_X + 50;
+    const gy = rowOffsets[row];
+    groupOffsets.push({ gx, gy, groupHeight });
+
+    groupNodes.push({
+      id: `group_${sub.id}`,
+      type: 'default',
+      position: { x: gx, y: gy },
+      style: {
+        width: groupWidth,
+        height: groupHeight,
+        background: isSelected ? 'rgba(139,92,246,0.08)' : 'rgba(156,163,175,0.04)',
+        border: isSelected ? '2px solid #8b5cf6' : '2px dashed #d1d5db',
+        borderRadius: 12,
+        fontSize: 13,
+        fontWeight: 700,
+        color: isSelected ? '#7c3aed' : '#9ca3af',
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'flex-start',
+        padding: '10px 14px',
+        pointerEvents: 'none',
+        opacity: isSelected ? 1 : 0.45,
+        zIndex: 0,
+      },
+      data: { label: sub.name },
+      draggable: false,
+      selectable: false,
+    });
+
+    // Component nodes — ABSOLUTE positions (gx + relative offset inside group)
+    sub.componentIds.forEach((mpn, compIdx) => {
+      const cCol = compIdx % COMPS_PER_ROW;
+      const cRow = Math.floor(compIdx / COMPS_PER_ROW);
+      const cx = gx + GROUP_PADDING + cCol * COLS_GAP;
+      const cy = gy + GROUP_PADDING + 40 + cRow * ROWS_GAP;
+      const comp = compById(allComponents, mpn);
+
+      compNodes.push({
+        id: `ctx_${sub.id}_${mpn}`,
+        type: 'component',
+        position: { x: cx, y: cy },
+        data: comp as any,
+        style: isSelected ? undefined : { opacity: 0.3 },
+      });
+    });
+  });
+
+  // Build mpn → absolute node id
+  const mpnToNodeId = new Map<string, string>();
+  allSubsystems.forEach((sub) => {
+    sub.componentIds.forEach((mpn) => mpnToNodeId.set(mpn, `ctx_${sub.id}_${mpn}`));
+  });
+
+  const selectedSet = new Set(selectedSubsystem.componentIds);
+
+  const edges: Edge[] = connections
+    .filter((c) => c.target_part)
+    .map((c, i) => {
+      const srcNodeId = mpnToNodeId.get(c.source_part);
+      const tgtNodeId = mpnToNodeId.get(c.target_part!);
+      if (!srcNodeId || !tgtNodeId) return null;
+
+      const isHighlighted = selectedSet.has(c.source_part) || selectedSet.has(c.target_part!);
+      const color = getEdgeColor(c.connection_type);
+
+      return {
+        id: `ctx_edge_${i}`,
+        source: srcNodeId,
+        target: tgtNodeId,
+        type: 'smoothstep',
+        style: {
+          ...(isHighlighted ? getEdgeStyle(c.connection_type) : { stroke: '#d1d5db', strokeWidth: 1 }),
+          opacity: isHighlighted ? 1 : 0.2,
+        },
+        label: isHighlighted ? c.connection_type : undefined,
+        labelStyle: { fontSize: 9, fill: color, fontWeight: 600 },
+        labelBgStyle: { fill: 'white', fillOpacity: 0.85 },
+        markerEnd: isHighlighted ? { type: MarkerType.ArrowClosed, color } : undefined,
+        animated: isHighlighted && c.connection_type === 'switching',
+      } as Edge;
+    })
+    .filter((e): e is Edge => e !== null);
+
+  return {
+    nodes: [...groupNodes, ...compNodes],
+    edges,
+  };
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function SubsystemDiagramView({
+  selectedSubsystem,
+  allSubsystems,
+  allComponents,
+  connections,
+}: SubsystemDiagramViewProps) {
+  const [mode, setMode] = useState<DiagramMode>('isolated');
+
+  const { nodes: computed, edges: computedEdges } = useMemo(() => {
+    if (mode === 'isolated') {
+      return buildIsolatedLayout(selectedSubsystem, allSubsystems, allComponents, connections);
+    }
+    return buildContextLayout(selectedSubsystem, allSubsystems, allComponents, connections);
+  }, [mode, selectedSubsystem, allSubsystems, allComponents, connections]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(computed);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(computedEdges);
+
+  useEffect(() => {
+    setNodes(computed);
+    setEdges(computedEdges);
+  }, [computed, computedEdges, setNodes, setEdges]);
+
+  return (
+    <div className="rounded-xl border-2 border-gray-200 bg-white overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <Network className="h-4 w-4 text-purple-600" />
+          <span className="font-semibold text-gray-900 text-sm">Subsystem Architecture</span>
+          <span className="text-xs text-gray-500">
+            ({selectedSubsystem.componentIds.length} components)
+          </span>
+        </div>
+        <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+          <button
+            onClick={() => setMode('isolated')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              mode === 'isolated'
+                ? 'bg-white text-purple-700 shadow-sm border border-gray-200'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Focus className="h-3 w-3" />
+            Isolated
+          </button>
+          <button
+            onClick={() => setMode('context')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              mode === 'context'
+                ? 'bg-white text-purple-700 shadow-sm border border-gray-200'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Network className="h-3 w-3" />
+            Full Context
+          </button>
+        </div>
+      </div>
+
+      {/* ReactFlow canvas */}
+      <div style={{ height: 480 }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.15 }}
+          nodesDraggable={true}
+          nodesConnectable={false}
+          elementsSelectable={true}
+          minZoom={0.1}
+          maxZoom={1.5}
+        >
+          <Background gap={20} color="#f0f0f0" />
+          <Controls showInteractive={false} />
+          <MiniMap nodeStrokeWidth={2} zoomable pannable style={{ height: 80 }} />
+        </ReactFlow>
+      </div>
+
+      {/* Legend */}
+      {mode === 'isolated' && (
+        <div className="flex flex-wrap items-center gap-4 px-5 py-2 border-t border-gray-100 bg-gray-50">
+          <span className="text-xs text-gray-500 font-medium">Connections:</span>
+          {Object.entries(defaultConnectionTypeColors).slice(0, 6).map(([type, color]) => (
+            <div key={type} className="flex items-center gap-1.5">
+              <div className="w-5 h-0.5" style={{ background: color, height: '2px' }} />
+              <span className="text-xs text-gray-500 capitalize">{type.replace(/_/g, ' ')}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-1.5 ml-auto">
+            <div className="w-5 h-0.5" style={{ borderTop: '2px dashed #9ca3af', height: '1px', width: '20px' }} />
+            <span className="text-xs text-gray-500">Cross-subsystem stub</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
