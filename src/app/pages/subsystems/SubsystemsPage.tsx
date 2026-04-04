@@ -51,23 +51,36 @@ export function SubsystemsPage() {
         // Update URL with session query param
         updateParams(activeSessionId);
 
-        // 1. Fetch subsystems (GET first, POST if empty)
+        // 1. Fetch subsystems (GET first, POST only if truly empty)
         let subsystemsResponse;
         try {
           subsystemsResponse = await getSubsystems(activeSessionId);
-          
-          // If subsystems are empty, generate them via POST
+
           if (subsystemsResponse.subsystems_count === 0 || subsystemsResponse.subsystems.length === 0) {
+            if (!isCurrent) return;
             console.log('Subsystems are empty, generating...');
-            subsystemsResponse = await generateSubsystems(activeSessionId);
-            console.log('Generated subsystems:', subsystemsResponse.subsystems);
+            try {
+              subsystemsResponse = await generateSubsystems(activeSessionId);
+            } catch (postError: any) {
+              // 409 = another concurrent call already generated them — re-fetch
+              if (postError.message?.includes('409')) {
+                subsystemsResponse = await getSubsystems(activeSessionId);
+              } else {
+                throw postError;
+              }
+            }
           }
         } catch (getError: any) {
-          // If 404 or error, try POST to generate
           if (getError.message?.includes('404') || getError.message?.includes('Failed to get subsystems')) {
-            console.log('Subsystems not found, generating...');
-            subsystemsResponse = await generateSubsystems(activeSessionId);
-            console.log('Generated subsystems:', subsystemsResponse.subsystems);
+            try {
+              subsystemsResponse = await generateSubsystems(activeSessionId);
+            } catch (postError: any) {
+              if (postError.message?.includes('409')) {
+                subsystemsResponse = await getSubsystems(activeSessionId);
+              } else {
+                throw postError;
+              }
+            }
           } else {
             throw getError;
           }
