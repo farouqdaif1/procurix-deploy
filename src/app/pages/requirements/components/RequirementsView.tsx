@@ -39,47 +39,56 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
 
   // Fetch requirements from API
   useEffect(() => {
+    let isCurrent = true;
+
     const fetchRequirements = async () => {
       if (!sessionId) {
-        setIsGenerating(false);
-        setError('No session found. Please upload a BOM first.');
+        if (isCurrent) { setIsGenerating(false); setError('No session found. Please upload a BOM first.'); }
         return;
       }
 
-      setIsGenerating(true);
-      setError(null);
+      if (isCurrent) { setIsGenerating(true); setError(null); }
 
       try {
-        // Try GET first, fallback to POST if 404 or if requirements are empty
         let result;
+
+        // GET first — only POST (generate) if truly empty
         try {
           result = await getRequirementsGET(sessionId);
-          console.log('Got requirements from GET endpoint');
-          
-          // Check if requirements are empty (not generated yet)
+
           if (result.requirements_count === 0 || (result.requirements && result.requirements.length === 0)) {
-            console.log('Requirements are empty, generating...');
-            // Don't update stage when just loading/fetching - only update when user completes action
-            result = await getRequirements(sessionId);
-            console.log('Generated requirements from POST endpoint');
+            if (!isCurrent) return;
+            try {
+              result = await getRequirements(sessionId);
+            } catch (postError: any) {
+              // 409 = another concurrent call is already generating — re-fetch
+              if (postError.message?.includes('409')) {
+                result = await getRequirementsGET(sessionId);
+              } else {
+                throw postError;
+              }
+            }
           }
         } catch (getError: any) {
-          // If 404, try POST to generate requirements
-          if (getError.message?.includes('404') || getError.message?.includes('Failed to get requirements: 404')) {
-            console.log('Requirements not found, generating...');
-            // Don't update stage when just loading/fetching - only update when user completes action
-            result = await getRequirements(sessionId);
-            console.log('Generated requirements from POST endpoint');
+          if (getError.message?.includes('404')) {
+            if (!isCurrent) return;
+            try {
+              result = await getRequirements(sessionId);
+            } catch (postError: any) {
+              if (postError.message?.includes('409')) {
+                result = await getRequirementsGET(sessionId);
+              } else {
+                throw postError;
+              }
+            }
           } else {
             throw getError;
           }
         }
-        
-        if (!result.success) {
-          throw new Error('Requirements request was not successful');
-        }
 
-        // Transform API requirements to component format
+        if (!result.success) throw new Error('Requirements request was not successful');
+        if (!isCurrent) return;
+
         const transformedRequirements: Requirement[] = result.requirements.map((req: APIRequirement) => ({
           id: req.req_id,
           category: req.category,
@@ -95,6 +104,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
         setIsGenerating(false);
         toast.success(`Loaded ${result.requirements_count} requirements`);
       } catch (error) {
+        if (!isCurrent) return;
         setIsGenerating(false);
         const errorMessage = error instanceof Error ? error.message : 'Failed to fetch requirements';
         setError(errorMessage);
@@ -103,6 +113,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
     };
 
     fetchRequirements();
+    return () => { isCurrent = false; };
   }, [sessionId, refreshTrigger]);
 
   const handleEdit = (reqId: string) => {

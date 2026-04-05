@@ -872,18 +872,21 @@ export function FundamentalClassificationView({
   // When in normal mode, skip research if already classified.
   useEffect(() => {
     if (!sessionId) return;
+    let isCurrent = true;
 
     const load = async () => {
       try {
         const result = await getClassification(sessionId);
+        if (!isCurrent) return;
         if (result.parts?.length) {
           if (forceClassifyPhase) {
-            // Check if all null — run AI classification agent first
             const allNull = Object.values(result.classification_map).every(v => v === null);
             if (allNull) {
               // Auto-classify via agent, then reload
               await classifyParts(sessionId);
+              if (!isCurrent) return;
               const refreshed = await getClassification(sessionId);
+              if (!isCurrent) return;
               setEnrichedParts(refreshed.parts ?? []);
             } else {
               setEnrichedParts(result.parts);
@@ -898,11 +901,12 @@ export function FundamentalClassificationView({
       } catch {
         // 404 or error — stay on current phase
       } finally {
-        if (forceClassifyPhase) setLoading(false);
+        if (isCurrent && forceClassifyPhase) setLoading(false);
       }
     };
 
     load();
+    return () => { isCurrent = false; };
   }, [sessionId, refreshTrigger, forceClassifyPhase]);
 
   if (!sessionId) {

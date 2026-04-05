@@ -45,19 +45,24 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
     initiatedRef.current = true;
 
     const init = async () => {
-      // Only fetch existing analysis if we know it has run (stage >= 2 = analyzed)
-      // Stage 1 = bom_uploaded — skip the GET, go straight to trigger
+      // Only fetch existing analysis if we know it has run (stage >= 2 = analyzed).
+      // Stage 1 = bom_uploaded — skip the GET, go straight to trigger.
+      // Wrap in try-catch: a 404 means analysis hasn't run yet — fall through to sendTrigger.
       if (currentStage !== null && currentStage >= 2) {
-        const existing = await getSystemAnalysis(sessionId);
-        if (existing.success && existing.suggestions?.length) {
-          setSuggestions(existing.suggestions);
-          const top = existing.suggestions[0];
-          pushSystem(
-            top?.confidence === 'high'
-              ? `${top.systemType} — select from the options on the right or type to refine.`
-              : `${existing.suggestions.length} options identified — review on the right or type to refine.`
-          );
-          return;
+        try {
+          const existing = await getSystemAnalysis(sessionId);
+          if (existing.success && existing.suggestions?.length) {
+            setSuggestions(existing.suggestions);
+            const top = existing.suggestions[0];
+            pushSystem(
+              top?.confidence === 'high'
+                ? `${top.systemType} — select from the options on the right or type to refine.`
+                : `${existing.suggestions.length} options identified — review on the right or type to refine.`
+            );
+            return;
+          }
+        } catch {
+          // 404 or network error — analysis not yet available, fall through to trigger
         }
       }
 

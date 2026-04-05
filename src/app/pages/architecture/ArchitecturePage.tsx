@@ -24,53 +24,56 @@ export function ArchitecturePage() {
   }, [querySessionId, contextSessionId, setSessionId]);
 
   useEffect(() => {
+    let isCurrent = true;
+
     const fetchConnections = async () => {
       const activeSessionId = contextSessionId || querySessionId;
-      
+
       if (!activeSessionId) {
-        setError('No session ID available');
-        setIsLoading(false);
+        if (isCurrent) { setError('No session ID available'); setIsLoading(false); }
         return;
       }
 
       try {
-        setIsLoading(true);
-        setError(null);
-        console.log('Session ID:', activeSessionId);
-        
-        // Update URL with session query param
+        if (isCurrent) { setIsLoading(true); setError(null); }
         updateParams(activeSessionId);
-        
-        // Try GET first, fallback to POST if 404 or if connections are empty
+
+        // GET first — only POST (generate) if truly empty
         let response;
         try {
-          // Use sessionId as bomId (they're the same in API response)
           response = await getConnections(activeSessionId, activeSessionId);
-          console.log('Got connections from GET endpoint');
-          
-          // Log connections from backend
-          console.log('Connections from backend:', response.connections);
-          
-          // Check if connections are empty (not generated yet)
+
           if (!response.connections || response.connections.length === 0) {
-            console.log('Connections are empty, generating...');
-            // Don't update stage when just loading/fetching - only update when user completes action
-            response = await analyzeConnections(activeSessionId);
-            console.log('Generated connections from POST endpoint');
-            console.log('Connections from backend:', response.connections);
+            if (!isCurrent) return;
+            try {
+              response = await analyzeConnections(activeSessionId);
+            } catch (postError: any) {
+              // 409 = another concurrent call is already generating — re-fetch
+              if (postError.message?.includes('409')) {
+                response = await getConnections(activeSessionId, activeSessionId);
+              } else {
+                throw postError;
+              }
+            }
           }
         } catch (getError: any) {
-          // If 404, try POST to generate connections
-          if (getError.message?.includes('404') || getError.message?.includes('Failed to get connections: 404')) {
-            console.log('Connections not found, generating...');
-            // Don't update stage when just loading/fetching - only update when user completes action
-            response = await analyzeConnections(activeSessionId);
-            console.log('Generated connections from POST endpoint');
-            console.log('Connections from backend:', response.connections);
+          if (getError.message?.includes('404')) {
+            if (!isCurrent) return;
+            try {
+              response = await analyzeConnections(activeSessionId);
+            } catch (postError: any) {
+              if (postError.message?.includes('409')) {
+                response = await getConnections(activeSessionId, activeSessionId);
+              } else {
+                throw postError;
+              }
+            }
           } else {
             throw getError;
           }
         }
+
+        if (!isCurrent) return;
         
         // Extract unique part numbers from connections
         const uniqueParts = new Set<string>();
@@ -115,6 +118,7 @@ export function ArchitecturePage() {
         setConnections(mappedConnections);
         setIsLoading(false);
       } catch (err) {
+        if (!isCurrent) return;
         const errorMessage = err instanceof Error ? err.message : 'Failed to fetch connections';
         setError(errorMessage);
         toast.error(errorMessage);
@@ -123,6 +127,7 @@ export function ArchitecturePage() {
     };
 
     fetchConnections();
+    return () => { isCurrent = false; };
   }, [contextSessionId, querySessionId, updateParams]);
 
   const handleArchitectureComplete = async (
