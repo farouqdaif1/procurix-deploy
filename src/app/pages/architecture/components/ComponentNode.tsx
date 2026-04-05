@@ -193,29 +193,40 @@ export const ComponentNode = (props: NodeProps) => {
       }`}
       style={{ minWidth: '280px', maxWidth: '320px' }}
     >
-      {/* Default handle on top when no pins */}
+      {/* Default source/target handles when no pinout defined */}
       {(!data.pinout || Object.keys(data.pinout).length === 0) && (
-        <Handle
-          key="handle-default-top"
-          id={`${data.id}-default`}
-          type="source"
-          position={Position.Top}
-          className="w-4 h-4"
-          style={{
-            top: 0,
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: '20px',
-            height: '20px',
-            borderRadius: '50%',
-            backgroundColor: '#6b7280', // Default gray color
-            border: '2px solid white',
-            boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
-          }}
-          data-pin-number="default"
-          data-pin-name="default"
-          data-pin-type="default"
-        />
+        <>
+          <Handle
+            type="target"
+            position={Position.Top}
+            style={{
+              top: 0,
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '20px',
+              height: '20px',
+              borderRadius: '50%',
+              backgroundColor: '#6b7280',
+              border: '2px solid white',
+              boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
+            }}
+          />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            style={{
+              bottom: 0,
+              left: '50%',
+              transform: 'translate(-50%, 50%)',
+              width: '20px',
+              height: '20px',
+              borderRadius: '50%',
+              backgroundColor: '#6b7280',
+              border: '2px solid white',
+              boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
+            }}
+          />
+        </>
       )}
       
       {/* Colored Type Section at Top */}

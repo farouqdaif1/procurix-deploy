@@ -66,20 +66,17 @@ const nodeTypes = {
 
 // Default connection type colors
 const defaultConnectionTypeColors: Record<string, string> = {
-    power: '#ef4444', // red
-    power_supply: '#ef4444', // alias: AI generates this → same as power
-    switching: '#f59e0b', // amber/orange for switching signals
-    power_and_feedback: '#8b5cf6', // purple for combined power/feedback
-    signal: '#3b82f6', // blue
-    reference: '#3b82f6', // alias: AI generates this → same as signal
-    data: '#8b5cf6', // purple
-    bus: '#8b5cf6', // alias: AI generates this → same as data
-    analog: '#f59e0b', // amber
-    differential: '#ec4899', // pink
-    clock: '#10b981', // green
-    ground: '#6b7280', // gray
-    feedback: '#9333ea', // purple for feedback
-    control: '#06b6d4', // cyan for control signals
+    power: '#ef4444',
+    switching: '#f59e0b',
+    power_and_feedback: '#8b5cf6',
+    signal: '#3b82f6',
+    data: '#8b5cf6',
+    analog: '#f59e0b',
+    differential: '#ec4899',
+    clock: '#10b981',
+    ground: '#6b7280',
+    feedback: '#9333ea',
+    control: '#06b6d4',
   };
 
 // Available colors for custom connection types (distinct colors that don't repeat)
@@ -154,7 +151,6 @@ const getEdgeStyle = (type: string) => {
   // Apply different line styles based on connection type
   switch (type) {
     case 'power':
-    case 'power_supply': // AI alias
       return {
         ...baseStyle,
         strokeWidth: 3,
@@ -163,26 +159,24 @@ const getEdgeStyle = (type: string) => {
       return {
         ...baseStyle,
         strokeWidth: 5,
-        strokeDasharray: undefined, // solid line
+        strokeDasharray: undefined,
       };
     case 'power_and_feedback':
       return {
         ...baseStyle,
         strokeWidth: 4,
-        strokeDasharray: '10,5', // dashed line
+        strokeDasharray: '10,5',
       };
     case 'signal':
-    case 'reference': // AI alias
       return {
         ...baseStyle,
         strokeWidth: 3,
       };
     case 'data':
-    case 'bus': // AI alias
       return {
         ...baseStyle,
         strokeWidth: 3,
-        strokeDasharray: '5,5', // dotted line
+        strokeDasharray: '5,5',
       };
     case 'analog':
       return {

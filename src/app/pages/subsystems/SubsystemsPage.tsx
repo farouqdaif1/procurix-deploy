@@ -4,8 +4,48 @@ import { SubsystemsView } from './components/SubsystemsView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
-import { getSubsystems, generateSubsystems, getConnections, getSubsystemConnections, getRequirementsGET, type Connection, type SubsystemConnection } from '@/app/services/api';
+import { getSubsystems, generateSubsystems, getConnections, getRequirementsGET, type Connection, type SubsystemConnection } from '@/app/services/api';
 import type { Component, Subsystem, Requirement } from '@/app/types';
+
+// Derive subsystem-level connections from part-level connections + subsystem membership.
+// Mirrors the backend get_subsystem_connections() logic — client-side so there is no
+// separate API call and no timing dependency on subsystem DB rows being committed.
+function computeSubsystemConnections(
+  connections: Connection[],
+  subsystems: Subsystem[],
+): SubsystemConnection[] {
+  const partToSubsystem = new Map<string, string>();
+  subsystems.forEach((sub) => {
+    sub.componentIds.forEach((mpn) => partToSubsystem.set(mpn, sub.id));
+  });
+
+  type GroupEntry = { types: string[]; count: number };
+  const groups = new Map<string, GroupEntry>();
+
+  connections.forEach((c) => {
+    if (!c.target_part) return;
+    const srcSub = partToSubsystem.get(c.source_part);
+    const tgtSub = partToSubsystem.get(c.target_part);
+    if (!srcSub || !tgtSub || srcSub === tgtSub) return;
+
+    const key = `${srcSub}||${tgtSub}`;
+    const entry = groups.get(key) ?? { types: [], count: 0 };
+    entry.count++;
+    if (!entry.types.includes(c.connection_type)) entry.types.push(c.connection_type);
+    groups.set(key, entry);
+  });
+
+  return Array.from(groups.entries()).map(([key, entry]) => {
+    const [src, tgt] = key.split('||');
+    return {
+      source_subsystem_id: src,
+      target_subsystem_id: tgt,
+      connection_types: entry.types,
+      primary_type: entry.types[0] || 'signal',
+      part_connection_count: entry.count,
+    };
+  });
+}
 
 export function SubsystemsPage() {
   const navigate = useNavigate();
@@ -121,20 +161,15 @@ export function SubsystemsPage() {
         if (!isCurrent) return;
         setComponents(componentsList);
 
-        // 3. Fetch part-level connections + subsystem-level connections
-        // Both fetched AFTER subsystems are committed so bom_reference is populated
+        // 3. Fetch part-level connections, then compute subsystem-level connections client-side.
+        // Computing locally means there is no separate API call and no timing dependency on
+        // subsystem DB rows being committed — eliminating the race condition entirely.
         try {
-          const [connectionsResponse, subsystemConnsResponse] = await Promise.all([
-            getConnections(activeSessionId, activeSessionId),
-            getSubsystemConnections(activeSessionId),
-          ]);
+          const connectionsResponse = await getConnections(activeSessionId, activeSessionId);
           if (!isCurrent) return;
-          if (connectionsResponse?.connections) {
-            setConnections(connectionsResponse.connections);
-          }
-          if (subsystemConnsResponse?.subsystem_connections) {
-            setSubsystemConnections(subsystemConnsResponse.subsystem_connections);
-          }
+          const connectionsList = connectionsResponse?.connections ?? [];
+          setConnections(connectionsList);
+          setSubsystemConnections(computeSubsystemConnections(connectionsList, mappedSubsystems));
         } catch (connError: any) {
           console.log('Connections not available:', connError.message);
         }

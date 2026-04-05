@@ -33,13 +33,10 @@ type DiagramMode = 'isolated' | 'context';
 
 const defaultConnectionTypeColors: Record<string, string> = {
   power: '#ef4444',
-  power_supply: '#ef4444',   // AI alias → same as power
   switching: '#f59e0b',
   power_and_feedback: '#8b5cf6',
   signal: '#3b82f6',
-  reference: '#3b82f6',      // AI alias → same as signal
   data: '#8b5cf6',
-  bus: '#8b5cf6',            // AI alias → same as data
   analog: '#f59e0b',
   differential: '#ec4899',
   clock: '#10b981',
@@ -58,14 +55,11 @@ const getEdgeStyle = (type: string): React.CSSProperties => {
   const base: React.CSSProperties = { stroke: color, zIndex: 1 };
   const t = (type || '').toLowerCase();
   switch (t) {
-    case 'power':
-    case 'power_supply':     return { ...base, strokeWidth: 3 };
+    case 'power':            return { ...base, strokeWidth: 3 };
     case 'switching':        return { ...base, strokeWidth: 5 };
     case 'power_and_feedback': return { ...base, strokeWidth: 4, strokeDasharray: '10,5' };
-    case 'signal':
-    case 'reference':        return { ...base, strokeWidth: 3 };
-    case 'data':
-    case 'bus':              return { ...base, strokeWidth: 3, strokeDasharray: '5,5' };
+    case 'signal':           return { ...base, strokeWidth: 3 };
+    case 'data':             return { ...base, strokeWidth: 3, strokeDasharray: '5,5' };
     case 'analog':           return { ...base, strokeWidth: 3, strokeDasharray: '8,4' };
     case 'differential':     return { ...base, strokeWidth: 3, strokeDasharray: '3,3' };
     case 'clock':            return { ...base, strokeWidth: 3, strokeDasharray: '12,4,4,4' };
@@ -119,30 +113,17 @@ function makeComponentNode(
   };
 }
 
-// ComponentNode always creates a default handle with id `${data.id}-default` (when no pinout).
-// Pass these explicitly so ReactFlow doesn't warn about handle id: null.
-function compHandleId(nodeId: string): string {
-  return `${nodeId}-default`;
-}
-
 function makeEdge(
   id: string,
   source: string,
   target: string,
   connectionType: string,
-  sourceHandle?: string,
-  targetHandle?: string,
 ): Edge {
   const color = getEdgeColor(connectionType);
   return {
     id,
     source,
     target,
-    // Only include handle props when explicitly provided — omitting lets ReactFlow
-    // use the node's default handle. Setting to undefined causes ReactFlow to look
-    // for handle id:null which fails on ComponentNode's named handles.
-    ...(sourceHandle ? { sourceHandle } : {}),
-    ...(targetHandle ? { targetHandle } : {}),
     type: 'smoothstep',
     label: connectionType,
     labelStyle: { fontSize: 9, fill: color, fontWeight: 600 },
@@ -180,7 +161,7 @@ function buildIsolatedLayout(
     });
   });
 
-  // Internal edges — both ends are ComponentNodes, specify their default handles explicitly
+  // Internal edges — connections where both ends belong to this subsystem
   const internalEdges: Edge[] = connections
     .filter((c) => c.target_part && compSet.has(c.source_part) && compSet.has(c.target_part!))
     .map((c, i) =>
@@ -189,13 +170,12 @@ function buildIsolatedLayout(
         c.source_part,
         c.target_part!,
         c.connection_type,
-        compHandleId(c.source_part),
-        compHandleId(c.target_part!),
       ),
     );
 
-  // Build external stubs from subsystem-level connections (aggregated, reliable)
-  // Each connected subsystem gets one stub node; anchor to first component in this subsystem
+  // Build external stubs — one stub node per connected subsystem.
+  // subsystemConnections is always computed client-side from part-level connections,
+  // so there is no API race and no need for a fallback code path.
   const anchorMpn = compIds[0] || '';
   const subById = new Map(allSubsystems.map((s) => [s.id, s]));
 
@@ -208,7 +188,7 @@ function buildIsolatedLayout(
   let outIdx = 0;
   let inIdx = 0;
 
-  // outgoing: selectedSubsystem is source
+  // Outgoing stubs: selectedSubsystem is source
   subsystemConnections
     .filter((sc) => sc.source_subsystem_id === selectedSubsystem.id)
     .forEach((sc) => {
@@ -236,12 +216,12 @@ function buildIsolatedLayout(
 
       if (anchorMpn) {
         stubEdges.push(
-          makeEdge(`stub_edge_out_${sc.target_subsystem_id}`, anchorMpn, stubId, sc.primary_type, compHandleId(anchorMpn)),
+          makeEdge(`stub_edge_out_${sc.target_subsystem_id}`, anchorMpn, stubId, sc.primary_type),
         );
       }
     });
 
-  // incoming: selectedSubsystem is target
+  // Incoming stubs: selectedSubsystem is target
   subsystemConnections
     .filter((sc) => sc.target_subsystem_id === selectedSubsystem.id)
     .forEach((sc) => {
@@ -269,7 +249,7 @@ function buildIsolatedLayout(
 
       if (anchorMpn) {
         stubEdges.push(
-          makeEdge(`stub_edge_in_${sc.source_subsystem_id}`, stubId, anchorMpn, sc.primary_type, undefined, compHandleId(anchorMpn)),
+          makeEdge(`stub_edge_in_${sc.source_subsystem_id}`, stubId, anchorMpn, sc.primary_type),
         );
       }
     });
@@ -292,7 +272,7 @@ function buildContextLayout(
   selectedSubsystem: Subsystem,
   allSubsystems: Subsystem[],
   allComponents: Component[],
-  _connections: APIConnection[],
+  connections: APIConnection[],
   subsystemConnections: SubsystemConnection[],
 ): { nodes: Node[]; edges: Edge[] } {
   const groupNodes: Node[] = [];
@@ -374,11 +354,46 @@ function buildContextLayout(
     });
   });
 
-  // Inter-subsystem edges using aggregated subsystem connections (group node → group node).
-  // These connect `group_${source_subsystem_id}` → `group_${target_subsystem_id}`.
-  // Group nodes are plain default nodes with no explicit handles — ReactFlow uses their
-  // center handle automatically, so we don't pass sourceHandle/targetHandle.
-  const interSubEdges: Edge[] = subsystemConnections.map((sc, i) => {
+  // Part-level edges between ctx_${subId}_${mpn} nodes.
+  // Connections involving the selected subsystem are highlighted; others are dimmed.
+  const partToSubsystem = new Map<string, string>();
+  allSubsystems.forEach((sub) => {
+    sub.componentIds.forEach((mpn) => partToSubsystem.set(mpn, sub.id));
+  });
+
+  const partEdges: Edge[] = connections
+    .filter((c) => c.target_part)
+    .flatMap((c, i) => {
+      const srcSub = partToSubsystem.get(c.source_part);
+      const tgtSub = partToSubsystem.get(c.target_part!);
+      if (!srcSub || !tgtSub) return [];
+
+      const isInvolved =
+        srcSub === selectedSubsystem.id || tgtSub === selectedSubsystem.id;
+      const color = getEdgeColor(c.connection_type);
+
+      return [{
+        id: `ctx_edge_${i}_${c.source_part}_${c.target_part}`,
+        source: `ctx_${srcSub}_${c.source_part}`,
+        target: `ctx_${tgtSub}_${c.target_part}`,
+        type: 'smoothstep',
+        label: isInvolved ? c.connection_type : undefined,
+        labelStyle: { fontSize: 9, fill: color, fontWeight: 600 },
+        labelBgStyle: { fill: 'white', fillOpacity: 0.85 },
+        style: {
+          ...(isInvolved ? getEdgeStyle(c.connection_type) : { stroke: '#d1d5db', strokeWidth: 1 }),
+          opacity: isInvolved ? 1 : 0.15,
+          zIndex: isInvolved ? 10 : 1,
+        },
+        markerEnd: isInvolved ? { type: MarkerType.ArrowClosed, color } : undefined,
+        animated: isInvolved && c.connection_type === 'switching',
+      }] as Edge[];
+    });
+
+  // Subsystem-level abstraction edges: group_${id} → group_${id}.
+  // These show the architectural relationship between subsystems regardless of which
+  // components are involved. Rendered above part-level edges (higher zIndex).
+  const subsystemEdges: Edge[] = subsystemConnections.map((sc, i) => {
     const isInvolved =
       sc.source_subsystem_id === selectedSubsystem.id ||
       sc.target_subsystem_id === selectedSubsystem.id;
@@ -388,22 +403,22 @@ function buildContextLayout(
       source: `group_${sc.source_subsystem_id}`,
       target: `group_${sc.target_subsystem_id}`,
       type: 'smoothstep',
-      label: sc.primary_type,
-      labelStyle: { fontSize: 10, fill: color, fontWeight: 600 },
-      labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
+      label: `${sc.primary_type} (${sc.part_connection_count})`,
+      labelStyle: { fontSize: 10, fill: color, fontWeight: 700 },
+      labelBgStyle: { fill: 'white', fillOpacity: 0.95 },
       style: {
-        ...(isInvolved ? getEdgeStyle(sc.primary_type) : { stroke: '#d1d5db', strokeWidth: 1 }),
-        opacity: isInvolved ? 1 : 0.25,
-        zIndex: 10,
+        ...(isInvolved ? getEdgeStyle(sc.primary_type) : { stroke: '#9ca3af', strokeWidth: 1.5 }),
+        opacity: isInvolved ? 1 : 0.35,
+        zIndex: 20,
       },
-      markerEnd: isInvolved ? { type: MarkerType.ArrowClosed, color } : undefined,
+      markerEnd: { type: MarkerType.ArrowClosed, color: isInvolved ? color : '#9ca3af' },
       animated: isInvolved && sc.primary_type === 'switching',
     } as Edge;
   });
 
   return {
     nodes: [...groupNodes, ...compNodes],
-    edges: interSubEdges,
+    edges: [...partEdges, ...subsystemEdges],
   };
 }
 

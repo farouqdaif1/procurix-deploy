@@ -96,28 +96,9 @@ export function ArchitecturePage() {
         const mappedConnections = response.connections
           .filter((conn: Connection) => conn.target_part !== null) // Filter out connections without target
           .map((conn: Connection, index: number) => {
-            // Map connection_type to valid ConnectionData type
-            // "direct" maps to "signal", other types are used as-is if valid
-            const connectionTypeMap: Record<string, string> = {
-              'direct': 'signal',
-              // AI-generated types (connections agent)
-              'power_supply': 'power',   // AI uses power_supply → maps to power
-              'bus': 'data',             // AI uses bus (I2C/SPI/UART) → maps to data
-              'reference': 'signal',     // AI uses reference (voltage/clock ref) → maps to signal
-              // Frontend canonical types
-              'power': 'power',
-              'signal': 'signal',
-              'data': 'data',
-              'analog': 'analog',
-              'differential': 'differential',
-              'clock': 'clock',
-              'ground': 'ground',
-              'switching': 'switching',
-              'power_and_feedback': 'power_and_feedback',
-              'feedback': 'feedback',
-              'control': 'control',
-            };
-            const mappedType = connectionTypeMap[conn.connection_type.toLowerCase()] || 'signal';
+            // Connection types are normalized to canonical values by the backend before storage.
+            // Use the type as-is; fall back to 'signal' only for truly unknown values.
+            const mappedType = conn.connection_type.toLowerCase() || 'signal';
             
             return {
               id: `conn-${conn.source_part}-${conn.target_part}-${index}`,
