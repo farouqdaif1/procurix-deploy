@@ -411,18 +411,14 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
       if (sourcePinId) {
         // Has pin number, use pin handle
         sourceHandle = `${conn.from}-${sourcePinId}`;
-      } else if (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) {
-        // Use default handle if no pin specified or explicitly default
-        sourceHandle = `${conn.from}-default`;
       }
-      
+      // No pin → leave sourceHandle undefined; ReactFlow auto-picks the source handle
+
       if (targetPinId) {
         // Has pin number, use pin handle
         targetHandle = `${conn.to}-${targetPinId}`;
-      } else if (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) {
-        // Use default handle if no pin specified or explicitly default
-        targetHandle = `${conn.to}-default`;
       }
+      // No pin → leave targetHandle undefined; ReactFlow auto-picks the target handle
       
       // Create a unique key for this connection path
       const connectionKey = `${conn.from}-${conn.to}-${sourceHandle || 'default'}-${targetHandle || 'default'}`;
@@ -745,10 +741,8 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
         // Match by source/target and handles
         const sourcePinId = extractHandleId(conn.from_pin);
         const targetPinId = extractHandleId(conn.to_pin);
-        const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : 
-                            (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) ? `${conn.from}-default` : undefined;
-        const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : 
-                            (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) ? `${conn.to}-default` : undefined;
+        const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : undefined;
+        const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : undefined;
         
         return conn.from === edge.source && 
                conn.to === edge.target &&
@@ -781,10 +775,8 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
         // Match by source/target and handles
         const sourcePinId = extractHandleId(conn.from_pin);
         const targetPinId = extractHandleId(conn.to_pin);
-        const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : 
-                            (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) ? `${conn.from}-default` : undefined;
-        const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : 
-                            (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) ? `${conn.to}-default` : undefined;
+        const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : undefined;
+        const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : undefined;
         
         return conn.from === edge.source && 
                conn.to === edge.target &&
@@ -1171,10 +1163,8 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
         const connection = connections.find(conn => {
           const sourcePinId = extractHandleId(conn.from_pin);
           const targetPinId = extractHandleId(conn.to_pin);
-          const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : 
-                              (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) ? `${conn.from}-default` : undefined;
-          const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : 
-                              (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) ? `${conn.to}-default` : undefined;
+          const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : undefined;
+          const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : undefined;
           
           return conn.from === edgeToDelete.source && 
                  conn.to === edgeToDelete.target &&
@@ -1343,10 +1333,8 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
           const connection = connections.find(conn => {
             const sourcePinId = extractHandleId(conn.from_pin);
             const targetPinId = extractHandleId(conn.to_pin);
-            const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : 
-                                (!conn.from_pin || conn.from_pin.toLowerCase().includes('default')) ? `${conn.from}-default` : undefined;
-            const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : 
-                                (!conn.to_pin || conn.to_pin.toLowerCase().includes('default')) ? `${conn.to}-default` : undefined;
+            const sourceHandle = sourcePinId ? `${conn.from}-${sourcePinId}` : undefined;
+            const targetHandle = targetPinId ? `${conn.to}-${targetPinId}` : undefined;
             
             return conn.from === selectedEdge.source && 
                    conn.to === selectedEdge.target &&
