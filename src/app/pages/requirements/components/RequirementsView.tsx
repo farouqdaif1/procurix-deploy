@@ -24,7 +24,8 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
   const { sessionId, setCurrentStage, refreshTrigger } = useSession();
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [isGenerating, setIsGenerating] = useState(true);
-  const [, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [activeTab, setActiveTab] = useState<string>('All');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -114,7 +115,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
 
     fetchRequirements();
     return () => { isCurrent = false; };
-  }, [sessionId, refreshTrigger]);
+  }, [sessionId, refreshTrigger, retryCount]);
 
   const handleEdit = (reqId: string) => {
     setRequirements(prev =>
@@ -300,6 +301,25 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
               </div>
             </motion.div>
           </motion.div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && requirements.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center p-8">
+        <div className="w-full max-w-md text-center space-y-4">
+          <div className="rounded-xl border border-red-200 bg-red-50 p-8">
+            <h3 className="text-lg font-semibold text-red-800 mb-2">Requirements Generation Failed</h3>
+            <p className="text-sm text-red-700 mb-6">{error}</p>
+            <button
+              onClick={() => { setError(null); setIsGenerating(true); setRetryCount(c => c + 1); }}
+              className="rounded-lg bg-blue-600 px-6 py-2 text-white font-semibold hover:bg-blue-700 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );

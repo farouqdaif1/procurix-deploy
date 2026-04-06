@@ -58,6 +58,7 @@ interface SystemArchitectureViewProps {
   onArchitectureComplete: (blocks: ComponentBlock[], connections: ConnectionData[]) => void;
   backendResponse?: any; // Optional backend response with component_bom
   initialConnections?: ConnectionData[]; // Optional initial connections from API
+  classificationMap?: Record<string, string>; // part_number → 'auxiliary'|'non-auxiliary'
 }
 
 const nodeTypes = {
@@ -251,7 +252,7 @@ const extractHandleId = (pinName?: string): string | undefined => {
 };
 
 // Inner component that uses useReactFlow hook
-function SystemArchitectureViewInner({ components, onArchitectureComplete, backendResponse, initialConnections }: SystemArchitectureViewProps) {
+function SystemArchitectureViewInner({ components, onArchitectureComplete, backendResponse, initialConnections, classificationMap }: SystemArchitectureViewProps) {
   const { fitView } = useReactFlow();
   const [isAnalyzing, setIsAnalyzing] = useState(true);
   const [analysisStage, setAnalysisStage] = useState(0);
@@ -265,7 +266,18 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
   const [showAddConnectionType, setShowAddConnectionType] = useState(false);
   const [newConnectionType, setNewConnectionType] = useState('');
   const [layoutType, setLayoutType] = useState<LayoutType>('random');
-  
+  const [viewMode, setViewMode] = useState<'all' | 'fundamental'>('all');
+
+  // Fundamental-only filter: set of non-auxiliary part IDs
+  const fundamentalIds = useMemo(() => {
+    if (!classificationMap || Object.keys(classificationMap).length === 0) return null;
+    return new Set(
+      Object.entries(classificationMap)
+        .filter(([, cls]) => cls === 'non-auxiliary')
+        .map(([id]) => id)
+    );
+  }, [classificationMap]);
+
   // Fit view after blocks change
   useEffect(() => {
     if (blocks.length > 0) {
@@ -588,6 +600,22 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  // Filtered views for fundamental/all toggle (must be after nodes/edges are declared)
+  const displayNodes = useMemo(() => {
+    if (viewMode === 'all' || !fundamentalIds) return nodes;
+    return nodes.filter(n => fundamentalIds.has(n.id));
+  }, [nodes, viewMode, fundamentalIds]);
+
+  const displayEdges = useMemo(() => {
+    if (viewMode === 'all' || !fundamentalIds) return edges;
+    return edges.filter(e => fundamentalIds.has(e.source) && fundamentalIds.has(e.target));
+  }, [edges, viewMode, fundamentalIds]);
+
+  // Fit view when view mode changes
+  useEffect(() => {
+    setTimeout(() => { fitView({ padding: 0.2, duration: 300 }); }, 50);
+  }, [viewMode, fitView]);
 
   // Update nodes and edges when blocks/connections change
   useEffect(() => {
@@ -1250,8 +1278,8 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
         }
       `}</style>
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={displayNodes}
+        edges={displayEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -1287,14 +1315,25 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
         />
         <Panel position="top-right" className="m-4 flex flex-col gap-2">
           <div className="flex gap-2">
-            <Button 
-              onClick={() => setIsBuilderMode(!isBuilderMode)} 
+            <Button
+              onClick={() => setIsBuilderMode(!isBuilderMode)}
               variant={isBuilderMode ? "default" : "outline"}
               className="gap-2"
             >
               <Settings2 className="h-4 w-4" />
               {isBuilderMode ? 'Exit Builder' : 'Builder Mode'}
             </Button>
+            {fundamentalIds && (
+              <Button
+                onClick={() => setViewMode(v => v === 'all' ? 'fundamental' : 'all')}
+                variant={viewMode === 'fundamental' ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+                title={viewMode === 'fundamental' ? 'Showing fundamental parts only — click to show all' : 'Click to show fundamental parts only'}
+              >
+                {viewMode === 'fundamental' ? `Fundamental (${fundamentalIds.size})` : `All (${nodes.length})`}
+              </Button>
+            )}
             <Button onClick={handleComplete} className="gap-2">
               <CheckCircle className="h-4 w-4" />
               Complete Architecture
@@ -1561,14 +1600,15 @@ function SystemArchitectureViewInner({ components, onArchitectureComplete, backe
 }
 
 // Wrapper component that provides ReactFlow context
-export function SystemArchitectureView({ components, onArchitectureComplete, backendResponse, initialConnections }: SystemArchitectureViewProps) {
+export function SystemArchitectureView({ components, onArchitectureComplete, backendResponse, initialConnections, classificationMap }: SystemArchitectureViewProps) {
   return (
     <ReactFlowProvider>
-      <SystemArchitectureViewInner 
+      <SystemArchitectureViewInner
         components={components}
         onArchitectureComplete={onArchitectureComplete}
         backendResponse={backendResponse}
         initialConnections={initialConnections}
+        classificationMap={classificationMap}
       />
     </ReactFlowProvider>
   );

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { SystemArchitectureView } from './components/SystemArchitectureView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { analyzeConnections, getConnections, saveConnections, updateCurrentStageInContext, type Connection } from '@/app/services/api';
+import { analyzeConnections, getConnections, getClassification, saveConnections, updateCurrentStageInContext, type Connection } from '@/app/services/api';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
 import type { Component } from '@/app/types';
 
@@ -13,6 +13,7 @@ export function ArchitecturePage() {
   const { sessionId: querySessionId, updateParams } = useQueryParams();
   const [components, setComponents] = useState<Component[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
+  const [classificationMap, setClassificationMap] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,15 +75,26 @@ export function ArchitecturePage() {
         }
 
         if (!isCurrent) return;
-        
-        // Extract unique part numbers from connections
-        const uniqueParts = new Set<string>();
+
+        // Fetch all classified parts so isolated (unconnected) parts still appear
+        let allPartNumbers: string[] = [];
+        try {
+          const cls = await getClassification(activeSessionId);
+          allPartNumbers = Object.keys(cls.classification_map || {});
+          if (isCurrent) setClassificationMap(cls.classification_map || {});
+        } catch {
+          // fallback: derive from connections only
+        }
+        if (!isCurrent) return;
+
+        // Merge: start from all BOM parts, add any extras found only in connections
+        const uniqueParts = new Set<string>(allPartNumbers);
         response.connections.forEach((conn: Connection) => {
           if (conn.source_part) uniqueParts.add(conn.source_part);
           if (conn.target_part) uniqueParts.add(conn.target_part);
         });
 
-        // Create Component objects from unique parts
+        // Create Component objects from the full part set
         const componentsList: Component[] = Array.from(uniqueParts).map((partNumber) => ({
           id: partNumber,
           reference: partNumber,
@@ -203,6 +215,7 @@ export function ArchitecturePage() {
       components={components}
       onArchitectureComplete={handleArchitectureComplete}
       initialConnections={connections}
+      classificationMap={classificationMap}
     />
   );
 }
