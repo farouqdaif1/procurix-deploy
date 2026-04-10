@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Cpu, ArrowLeft, Command } from 'lucide-react';
-import { ChatPanel } from '@/app/shared/components/ChatPanel';
+import { Cpu, ArrowLeft, Command, MessageSquare } from 'lucide-react';
+import { ChatDrawer } from '@/app/shared/components/ChatDrawer';
 import { Button } from '@/app/shared/components/ui/button';
 import { StageIndicator } from '@/app/shared/components/StageIndicator';
 import { useState, useEffect } from 'react';
@@ -15,18 +15,23 @@ interface LayoutProps {
   showStageIndicator?: boolean;
 }
 
+// Pages that have their own embedded chat — drawer and button hidden there
+const PAGES_WITH_OWN_CHAT = new Set(['/system-identification', '/chat']);
+
 export function Layout({ children, showBackButton = true, showStageIndicator = false }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { sessionId, currentStage: maxReachedStage, setCurrentStage } = useSession();
   const [, setIsLoadingBOM] = useState(false);
+
+  const hasOwnChat = PAGES_WITH_OWN_CHAT.has(location.pathname);
 
   const getCurrentStage = (): SessionStage | null => {
     const path = location.pathname;
     const stageMap: Record<string, SessionStage> = {
       '/upload': 'upload',
-      // '/discovery': 'discovery', // Commented out
       '/part-identification': 'part-identification',
       '/system-identification': 'system-identification',
       '/classification': 'classification',
@@ -43,19 +48,15 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
   // Fetch BOM data to get current_stage when sessionId changes
   useEffect(() => {
     const fetchBOMData = async () => {
-      // Clear stage if we're on upload page without a session (new upload)
       if (location.pathname === '/upload' && !sessionId) {
         setCurrentStage(null);
         return;
       }
-      
       if (sessionId && !maxReachedStage) {
         setIsLoadingBOM(true);
         try {
           const bom = await getBOMBySessionId(sessionId);
-          if (bom) {
-            setCurrentStage(bom.current_stage);
-          }
+          if (bom) setCurrentStage(bom.current_stage);
         } catch (error) {
           console.error('Error fetching BOM data:', error);
         } finally {
@@ -63,7 +64,6 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
         }
       }
     };
-
     fetchBOMData();
   }, [sessionId, maxReachedStage, setCurrentStage, location.pathname]);
 
@@ -71,22 +71,26 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setCommandPaletteOpen((prev) => !prev);
+        setCommandPaletteOpen(prev => !prev);
       }
       if (e.key === 'Escape') {
         setCommandPaletteOpen(false);
+        setDrawerOpen(false);
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Close drawer when navigating to a page with its own chat
+  useEffect(() => {
+    if (hasOwnChat) setDrawerOpen(false);
+  }, [location.pathname, hasOwnChat]);
 
   const handleCommand = (command: string) => {
     const commandRoutes: Record<string, string> = {
       home: '/',
       upload: '/upload',
-      // discovery: '/discovery', // Commented out
       'part-identification': '/part-identification',
       'system-identification': '/system-identification',
       classification: '/classification',
@@ -96,12 +100,10 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
       subsystems: '/subsystems',
       review: '/review',
       completed: '/completed',
+      chat: '/chat',
     };
-    
     const route = commandRoutes[command];
-    if (route) {
-      navigate(route);
-    }
+    if (route) navigate(route);
     setCommandPaletteOpen(false);
   };
 
@@ -128,25 +130,41 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
               <p className="text-sm text-gray-600">Workflow Stages</p>
             </div>
           </div>
-          
-          <button
-            onClick={() => setCommandPaletteOpen(true)}
-            className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <Command className="h-4 w-4" />
-            <span>Commands</span>
-            <kbd className="rounded bg-gray-100 px-1.5 py-0.5 text-xs">⌘K</kbd>
-          </button>
+
+          <div className="flex items-center gap-2">
+            {/* Chat button — hidden on pages with their own console */}
+            {sessionId && !hasOwnChat && (
+              <button
+                onClick={() => setDrawerOpen(prev => !prev)}
+                className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-colors ${
+                  drawerOpen
+                    ? 'border-blue-300 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span>Chat</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setCommandPaletteOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <Command className="h-4 w-4" />
+              <span>Commands</span>
+              <kbd className="rounded bg-gray-100 px-1.5 py-0.5 text-xs">⌘K</kbd>
+            </button>
+          </div>
         </div>
 
-        {showStageIndicator && currentStage && (
+        {showStageIndicator && (currentStage ?? maxReachedStage) && (
           <StageIndicator
-            currentStage={currentStage}
+            currentStage={currentStage as any}
             maxReachedStage={maxReachedStage}
             onStageClick={(stage) => {
               const stageRoutes: Record<string, string> = {
                 upload: '/upload',
-                // discovery: '/discovery', // Commented out
                 'part-identification': '/part-identification',
                 'system-identification': '/system-identification',
                 classification: '/classification',
@@ -156,9 +174,7 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
                 subsystems: '/subsystems',
               };
               const route = stageRoutes[stage];
-              if (route) {
-                navigate(route);
-              }
+              if (route) navigate(route);
             }}
           />
         )}
@@ -174,8 +190,10 @@ export function Layout({ children, showBackButton = true, showStageIndicator = f
         onCommand={handleCommand}
       />
 
-      {/* Hide floating chat on /system-identification — that page has its own embedded chat */}
-      {location.pathname !== '/system-identification' && <ChatPanel />}
+      {/* Slide-over chat drawer — hidden on pages with their own embedded chat */}
+      {!hasOwnChat && (
+        <ChatDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      )}
     </div>
   );
 }

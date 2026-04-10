@@ -64,6 +64,7 @@ interface ActionPart {
   source?: string;
   confidence?: string;
   candidates?: PartCandidate[];
+  impact_level?: 'low' | 'high';
 }
 
 export interface PartIdentificationViewProps {
@@ -166,6 +167,7 @@ function ResearchPhase({
             status: 'multi_match',
             source: event.source,
             candidates: event.candidates,
+            impact_level: event.impact_level,
           });
         } else if (event.type === 'web_found') {
           replace(event.mpn, {
@@ -181,6 +183,7 @@ function ResearchPhase({
             product_url: event.product_url,
             confidence: event.confidence,
             source: event.source,
+            impact_level: event.impact_level,
           });
         } else if (event.type === 'not_found') {
           replace(event.mpn, { icon: 'miss', text: 'not found — add manually' });

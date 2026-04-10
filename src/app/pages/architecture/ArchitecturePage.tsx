@@ -9,7 +9,7 @@ import type { Component } from '@/app/types';
 
 export function ArchitecturePage() {
   const navigate = useNavigate();
-  const { sessionId: contextSessionId, setSessionId, setCurrentStage } = useSession();
+  const { sessionId: contextSessionId, setSessionId, setCurrentStage, refreshTrigger } = useSession();
   const { sessionId: querySessionId, updateParams } = useQueryParams();
   const [components, setComponents] = useState<Component[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
@@ -140,7 +140,7 @@ export function ArchitecturePage() {
 
     fetchConnections();
     return () => { isCurrent = false; };
-  }, [contextSessionId, querySessionId, updateParams]);
+  }, [contextSessionId, querySessionId, updateParams, refreshTrigger]);
 
   const handleArchitectureComplete = async (
     _blocks: any[],

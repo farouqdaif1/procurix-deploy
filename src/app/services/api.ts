@@ -198,10 +198,10 @@ export type IdentifyPartsStreamEvent =
   | { type: 'start'; total: number; message: string }
   | { type: 'searching'; mpn: string }
   | { type: 'exact_match'; mpn: string; category: string | null; description: string | null; source: string; confidence: string; datasheet_url: string | null; candidates: PartCandidate[]; params: Record<string, unknown>; impact_level: 'low' | 'high' }
-  | { type: 'multi_match'; mpn: string; description: string | null; source: string; candidates: PartCandidate[]; candidate_count: number }
-  | { type: 'web_found'; mpn: string; description: string | null; datasheet_url: string | null; product_url: string | null; confidence: string; source: string }
+  | { type: 'multi_match'; mpn: string; description: string | null; source: string; candidates: PartCandidate[]; candidate_count: number; impact_level: 'low' | 'high' }
+  | { type: 'web_found'; mpn: string; description: string | null; datasheet_url: string | null; product_url: string | null; confidence: string; source: string; impact_level: 'low' | 'high' }
   | { type: 'not_found'; mpn: string; message: string }
-  | { type: 'complete'; parts_identified: number }
+  | { type: 'complete'; parts_identified: number; not_found: number }
   | { type: 'error'; message: string };
 
 export async function identifyPartsStream(
@@ -1198,6 +1198,70 @@ export async function sendChatMessage(sessionId: string, message: string): Promi
         throw new Error(`Chat failed: ${response.status} ${errorText}`);
     }
     return response.json();
+}
+
+export interface ChatHistoryMessage {
+    id: number;
+    role: 'user' | 'assistant';
+    content: string;
+    agent_name?: string;
+    fsm_state?: string;
+    created_at: string;
+}
+
+export interface ChatHistoryResponse {
+    session_id: string;
+    messages: ChatHistoryMessage[];
+    count: number;
+}
+
+export async function getChatHistory(sessionId: string, limit = 50): Promise<ChatHistoryResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/chat/history?limit=${limit}`);
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to get chat history: ${response.status} ${errorText}`);
+    }
+    return response.json();
+}
+
+export type ChatStreamEvent =
+    | { type: 'token'; content: string }
+    | { type: 'done'; agent: string; state: string }
+    | { type: 'error'; message: string };
+
+export async function chatStream(
+    sessionId: string,
+    message: string,
+    onEvent: (event: ChatStreamEvent) => void,
+    pageContext?: string,
+): Promise<void> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, page_context: pageContext }),
+    });
+    if (!response.ok || !response.body) {
+        const errorText = await response.text();
+        throw new Error(`Chat stream failed: ${response.status} ${errorText}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop() ?? '';
+        for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith('data:')) continue;
+            try {
+                const evt = JSON.parse(line.slice(5).trim()) as ChatStreamEvent;
+                onEvent(evt);
+            } catch { /* skip malformed */ }
+        }
+    }
 }
 
 // GET version of getRequirements (currently only POST exists)

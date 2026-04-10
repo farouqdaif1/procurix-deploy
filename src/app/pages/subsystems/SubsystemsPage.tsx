@@ -49,7 +49,7 @@ function computeSubsystemConnections(
 
 export function SubsystemsPage() {
   const navigate = useNavigate();
-  const { sessionId: contextSessionId, setSessionId } = useSession();
+  const { sessionId: contextSessionId, setSessionId, refreshTrigger } = useSession();
   const { sessionId: querySessionId, updateParams } = useQueryParams();
   const [subsystems, setSubsystems] = useState<Subsystem[]>([]);
   const [components, setComponents] = useState<Component[]>([]);
@@ -207,7 +207,7 @@ export function SubsystemsPage() {
 
     fetchData();
     return () => { isCurrent = false; };
-  }, [contextSessionId, querySessionId, updateParams]);
+  }, [contextSessionId, querySessionId, updateParams, refreshTrigger]);
 
   const handleComplete = () => {
     const activeSessionId = contextSessionId || querySessionId;

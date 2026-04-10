@@ -3,7 +3,7 @@ import { CheckCircle, Zap, Loader2, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { sendChatMessage, getSystemAnalysis, selectSystemType, type SystemSuggestion } from '@/app/services/api';
+import { analyzeSystem, sendChatMessage, getSystemAnalysis, selectSystemType, type SystemSuggestion } from '@/app/services/api';
 
 interface Line {
   id: string;
@@ -79,15 +79,24 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
   const pushOutput = (content: string) => pushLine('output', content);
   const pushError  = (content: string) => pushLine('error', content);
 
-  const sendTrigger = async () => {
+  const sendTrigger = async (additionalContext?: string) => {
     if (!sessionId) return;
     setLoading(true);
+    pushSystem('Analyzing system type...');
     try {
-      const res = await sendChatMessage(sessionId, '__begin_system_identification__');
-      pushOutput(res.data);
-      await refreshSuggestions();
-    } catch {
-      pushError('Failed to start analysis. Please refresh.');
+      const res = await analyzeSystem(sessionId, additionalContext);
+      if (res.suggestions?.length) {
+        setSuggestions(res.suggestions);
+        const top = res.suggestions[0];
+        pushOutput(
+          top?.confidence === 'high'
+            ? `${top.systemType} — select from the options on the right or type to refine.`
+            : `${res.suggestions.length} options identified — review on the right or type to refine.`
+        );
+        triggerRefresh();
+      }
+    } catch (err: unknown) {
+      pushError(`Failed to start analysis: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
       inputRef.current?.focus();

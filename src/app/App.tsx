@@ -15,6 +15,7 @@ import { SubsystemsPage } from './pages/subsystems/SubsystemsPage';
 import { ReviewPage } from './pages/review/ReviewPage';
 import { CompletedPage } from './pages/completed/CompletedPage';
 import { OptimizationPage } from './pages/optimization/OptimizationPage';
+import { ChatConsolePage } from './pages/chat/ChatConsolePage';
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/review" element={<Layout><ReviewPage /></Layout>} />
           <Route path="/completed" element={<CompletedPage />} />
           <Route path="/optimization" element={<OptimizationPage />} />
+          <Route path="/chat" element={<Layout showStageIndicator={true}><ChatConsolePage /></Layout>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </SessionProvider>
