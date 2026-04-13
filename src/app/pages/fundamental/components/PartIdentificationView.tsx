@@ -52,6 +52,7 @@ interface IdentifiedPart {
   confidence?: string;
   candidates?: PartCandidate[];
   impact_level?: 'low' | 'high';
+  params?: Record<string, { display_value?: string; value?: unknown; units?: string }>;
 }
 
 /** A part that needs user action (multi_match / web_found / not_found). */
@@ -155,6 +156,7 @@ function ResearchPhase({
             confidence: event.confidence,
             candidates: event.candidates,
             impact_level: event.impact_level,
+            params: event.params,
           });
         } else if (event.type === 'multi_match') {
           replace(event.mpn, {
@@ -492,7 +494,7 @@ function ReviewPhase({
                       </div>
                     </button>
 
-                    {/* Expanded: show candidates to pick */}
+                    {/* Expanded: show specs + candidates to pick */}
                     {isOpen && (
                       <div className="px-4 pb-4 pt-1 border-t border-gray-100">
                         {p.datasheet_url && (
@@ -504,6 +506,21 @@ function ReviewPhase({
                           >
                             <ExternalLink className="h-3 w-3" /> View datasheet
                           </a>
+                        )}
+                        {p.params && Object.keys(p.params).length > 0 && (
+                          <div className="mb-3">
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold mb-1.5">Technical Specifications</div>
+                            <div className="grid grid-cols-2 gap-1">
+                              {Object.entries(p.params).map(([key, spec]) => (
+                                <div key={key} className="flex items-center justify-between bg-gray-50 rounded px-2 py-1">
+                                  <span className="text-[11px] text-gray-500 truncate mr-2">{key}</span>
+                                  <span className="text-[11px] font-semibold text-gray-800 shrink-0">
+                                    {spec.display_value ?? (spec.value != null ? `${spec.value}${spec.units ? ' ' + spec.units : ''}` : '—')}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
                         {hasAlts ? (
                           <div className="space-y-1.5">

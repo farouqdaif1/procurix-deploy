@@ -78,6 +78,7 @@ export interface PartCandidate {
     datasheet_url: string | null;
     is_exact_match: boolean;
     confidence: number;
+    params?: Record<string, unknown>;
 }
 
 export interface PartDetail {
@@ -259,6 +260,7 @@ export async function selectPartMatch(
             selected_category: candidate.category,
             selected_description: candidate.description,
             selected_datasheet_url: candidate.datasheet_url,
+            selected_params: candidate.params ?? {},
         }),
     });
     if (!response.ok) {
@@ -846,6 +848,27 @@ export async function updateCurrentStageInContext(
 }
 
 // GET endpoints for fetching existing data
+
+export async function getPartSpecs(sessionId: string): Promise<Record<string, Record<string, string>>> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/validation-results`);
+    if (!response.ok) return {};
+    const data = await response.json();
+    const map: Record<string, Record<string, string>> = {};
+    for (const part of data.results ?? []) {
+        if (!part.mpn || !part.params) continue;
+        const flat: Record<string, string> = {};
+        for (const [key, val] of Object.entries(part.params as Record<string, unknown>)) {
+            if (val && typeof val === 'object') {
+                const p = val as { display_value?: string; value?: unknown; units?: string };
+                flat[key] = p.display_value ?? (p.value != null ? `${p.value}${p.units ? ' ' + p.units : ''}` : '');
+            } else if (val != null) {
+                flat[key] = String(val);
+            }
+        }
+        if (Object.keys(flat).length > 0) map[part.mpn] = flat;
+    }
+    return map;
+}
 
 export async function getClassification(sessionId: string): Promise<ClassifyPartsResponse> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/classification`, {

@@ -38,22 +38,10 @@ export const ComponentNode = (props: NodeProps) => {
   };
 
   const getKeySpecs = () => {
-    const specs: string[] = [];
-    if (data.specs.voltage) specs.push(`${data.specs.voltage}V`);
-    if (data.specs.current) specs.push(`${data.specs.current}A`);
-    if (data.specs.input_voltage_min && data.specs.input_voltage_max) {
-      specs.push(`Vin: ${data.specs.input_voltage_min}-${data.specs.input_voltage_max}`);
-    }
-    if (data.specs.output_voltage) specs.push(`Vout: ${data.specs.output_voltage}`);
-    if (data.specs.inductance) specs.push(`L: ${data.specs.inductance}`);
-    if (data.specs.efficiency_typ) {
-      // Extract first number from efficiency range (e.g., "90-95%" -> "90")
-      // Convert to string first in case it's a number
-      const effStr = String(data.specs.efficiency_typ);
-      const effMatch = effStr.match(/^(\d+)/);
-      if (effMatch) specs.push(`Eff: ${effMatch[1]}`);
-    }
-    return specs;
+    return Object.entries(data.specs)
+      .filter(([, v]) => v != null && v !== '')
+      .slice(0, 4)
+      .map(([key, value]) => `${key}: ${value}`);
   };
 
   // Get color for pin type - supports custom types with unique colors
@@ -407,17 +395,12 @@ export const ComponentNode = (props: NodeProps) => {
             )}
 
             {/* All Specs */}
-            {Object.entries(data.specs).map(([key, value]) => {
-              // Skip already displayed specs
-              if (['package', 'function', 'voltage', 'current'].includes(key)) return null;
-              
-              return (
-                <div key={key} className="flex justify-between text-xs">
-                  <span className="text-gray-500 capitalize">{key.replace(/_/g, ' ')}:</span>
-                  <span className="text-gray-700 font-medium">{String(value)}</span>
-                </div>
-              );
-            })}
+            {Object.entries(data.specs).map(([key, value]) => (
+              <div key={key} className="flex justify-between text-xs">
+                <span className="text-gray-500">{key}:</span>
+                <span className="text-gray-700 font-medium">{String(value)}</span>
+              </div>
+            ))}
 
             {/* Compliance Information */}
             {data.complianceScore !== undefined && (

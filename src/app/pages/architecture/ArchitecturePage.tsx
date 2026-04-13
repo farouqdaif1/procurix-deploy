@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { SystemArchitectureView } from './components/SystemArchitectureView';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { analyzeConnections, getConnections, getClassification, saveConnections, updateCurrentStageInContext, type Connection } from '@/app/services/api';
+import { analyzeConnections, getConnections, getClassification, getPartSpecs, saveConnections, updateCurrentStageInContext, type Connection } from '@/app/services/api';
 import { useQueryParams } from '@/app/shared/hooks/useQueryParams';
 import type { Component } from '@/app/types';
 
@@ -78,9 +78,14 @@ export function ArchitecturePage() {
 
         // Fetch all classified parts so isolated (unconnected) parts still appear
         let allPartNumbers: string[] = [];
+        let specsMap: Record<string, Record<string, unknown>> = {};
         try {
-          const cls = await getClassification(activeSessionId);
+          const [cls, specs] = await Promise.all([
+            getClassification(activeSessionId),
+            getPartSpecs(activeSessionId),
+          ]);
           allPartNumbers = Object.keys(cls.classification_map || {});
+          specsMap = specs;
           if (isCurrent) setClassificationMap(cls.classification_map || {});
         } catch {
           // fallback: derive from connections only
@@ -101,7 +106,7 @@ export function ArchitecturePage() {
           partNumber: partNumber,
           type: 'component',
           description: `Component ${partNumber}`,
-          specs: {},
+          specs: specsMap[partNumber] ?? {},
           isIdentified: true,
           isGeneric: false,
           complianceStatus: 'compliant',
