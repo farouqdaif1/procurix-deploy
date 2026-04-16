@@ -33,8 +33,8 @@ export default function App() {
           {/* Step 4: Aux/Non-Aux Classification */}
           <Route path="/classification" element={<Layout showStageIndicator={true}><ClassificationPage /></Layout>} />
           <Route path="/validate" element={<Layout showStageIndicator={true}><ValidatePage /></Layout>} />
-          <Route path="/architecture" element={<Layout showStageIndicator={true}><ArchitecturePage /></Layout>} />
           <Route path="/requirements" element={<Layout showStageIndicator={true}><RequirementsPage /></Layout>} />
+          <Route path="/architecture" element={<Layout showStageIndicator={true}><ArchitecturePage /></Layout>} />
           <Route path="/subsystems" element={<Layout showStageIndicator={true}><SubsystemsPage /></Layout>} />
           <Route path="/review" element={<Layout><ReviewPage /></Layout>} />
           <Route path="/completed" element={<CompletedPage />} />

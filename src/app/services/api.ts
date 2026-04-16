@@ -1043,22 +1043,64 @@ export async function generateSubsystems(sessionId: string): Promise<SubsystemsR
 }
 
 export interface SubsystemDetailsResponse {
+    success?: boolean;
+    session_id?: string;
     subsystem_id: string;
     name: string;
     description: string;
-    component_bom: Array<{
+    associated_requirements?: string[];
+    // Enriched parts from /detailed endpoint
+    parts: Array<{
+        part_number: string;
+        manufacturer?: string;
+        quantity: number;
+        component_id?: string;
+        category?: string;
+        classification?: string;
+        specs?: {
+            category?: string;
+            shortDescription?: string;
+            description?: string;
+            datasheet_url?: string;
+            params?: Record<string, any>;
+            [key: string]: any;
+        };
+        enrichment_source?: string;
+        enrichment_confidence?: number;
+        datasheet_url?: string;
+    }>;
+    parts_count: number;
+    connections: Array<{
+        source_part_number: string;
+        target_part_number: string;
+        connection_type: string;
+        is_internal: boolean;
+    }>;
+    connections_count: number;
+    internal_connections_count: number;
+    external_connections_count: number;
+    requirements: Array<{
+        req_id: string;
+        description: string;
+        criteria?: any;
+        priority?: string;
+        mapped_components?: string[];
+    }>;
+    requirements_count: number;
+    // Legacy fields for backwards compatibility
+    component_bom?: Array<{
         component_id: string;
         quantity: number;
     }>;
-    actual_parts_bom: Array<{
+    actual_parts_bom?: Array<{
         part_number: string;
         quantity: number;
     }>;
-    requirements: Record<string, any>;
 }
 
 export async function getSubsystemDetails(sessionId: string, subsystemId: string): Promise<SubsystemDetailsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}`, {
+    // Use the /detailed endpoint to get enriched part specs
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}/detailed`, {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json',

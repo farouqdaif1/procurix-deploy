@@ -119,16 +119,51 @@ export function SubsystemsView({ subsystems, components, requirements, connectio
         const detailsResponse = await getSubsystemDetails(sessionId, selectedSubsystem.id);
         setSubsystemDetails(detailsResponse);
 
-        // Update components list with detailed BOM data
-        const detailedComponents: Component[] = detailsResponse.actual_parts_bom
+        // Update components list with detailed BOM data including enriched specs
+        const detailedComponents: Component[] = (detailsResponse.parts || [])
           .map((part: any) => {
-            // Only use existing component if found, otherwise skip
+            // Find existing component to preserve any local state
             const existingComponent = classifiedComponents.find(
               c => c.id === part.part_number || c.partNumber === part.part_number
             );
-            return existingComponent;
-          })
-          .filter((component: Component | undefined): component is Component => component !== undefined);
+
+            // Extract params from specs for display
+            const specs = part.specs || {};
+            const params = specs.params || {};
+
+            // Build a user-friendly specs object from the enriched data
+            const displaySpecs: Record<string, any> = {
+              // Basic info
+              category: specs.category || part.category,
+              description: specs.shortDescription || specs.description,
+              datasheetUrl: specs.datasheet_url || part.datasheet_url,
+              // Params - flatten key specs for display
+              ...Object.entries(params).reduce((acc, [key, value]: [string, any]) => {
+                if (value && typeof value === 'object') {
+                  acc[key] = value.display_value || value.si_value || JSON.stringify(value);
+                } else if (value) {
+                  acc[key] = value;
+                }
+                return acc;
+              }, {} as Record<string, any>),
+            };
+
+            return {
+              id: part.part_number,
+              reference: part.component_id || part.part_number,
+              partNumber: part.part_number,
+              type: part.category || 'component',
+              description: specs.shortDescription || specs.description || part.part_number,
+              manufacturer: part.manufacturer,
+              specs: displaySpecs,
+              isIdentified: true,
+              isGeneric: false,
+              complianceStatus: existingComponent?.complianceStatus || ('unknown' as const),
+              datasheetUrl: specs.datasheet_url || part.datasheet_url,
+              // Store full specs for detailed view
+              fullSpecs: specs,
+            } as Component;
+          });
 
         setSubsystemComponents(prev => ({
           ...prev,
@@ -461,16 +496,21 @@ export function SubsystemsView({ subsystems, components, requirements, connectio
 
   const handleViewDatasheet = (component: Component) => {
     // Check if component has a datasheet URL in specs or as a property
-    const datasheetUrl = (component as any).datasheetUrl || component.specs?.datasheetUrl;
-    
+    const datasheetUrl = (component as any).datasheetUrl ||
+      component.specs?.datasheetUrl ||
+      (component as any).fullSpecs?.datasheet_url;
+
     if (datasheetUrl) {
       window.open(datasheetUrl, '_blank');
       toast.success(`Opening datasheet for ${component.partNumber}`, {
         description: 'Datasheet link opened in new tab'
       });
     } else {
-      toast.error('Datasheet URL not available', {
-        description: `No datasheet URL found for ${component.partNumber}`
+      // Fallback: search for datasheet on common sites
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(component.partNumber || '')}+datasheet+filetype:pdf`;
+      window.open(searchUrl, '_blank');
+      toast.info(`Searching for datasheet for ${component.partNumber}`, {
+        description: 'No direct link available - opening search'
       });
     }
   };
@@ -1327,91 +1367,82 @@ export function SubsystemsView({ subsystems, components, requirements, connectio
                   // View Mode
                   <div className="space-y-4">
                     {/* Description */}
-                    {selectedComponent.description && (
+                    {(selectedComponent.specs?.description || selectedComponent.description) && (
                       <div className="rounded-lg bg-white border border-gray-200 p-4">
                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
                           Description
                         </div>
-                        <p className="text-sm text-gray-700">{selectedComponent.description}</p>
+                        <p className="text-sm text-gray-700">
+                          {selectedComponent.specs?.description || selectedComponent.description}
+                        </p>
                       </div>
                     )}
 
-                    {/* Specifications Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-
-                      {selectedComponent.specs?.tolerance && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Tolerance
-                          </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.tolerance}
-                          </div>
+                    {/* Category */}
+                    {selectedComponent.specs?.category && (
+                      <div className="rounded-lg bg-white border border-gray-200 p-4">
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                          Category
                         </div>
-                      )}
+                        <Badge className="bg-purple-100 text-purple-700">
+                          {selectedComponent.specs.category}
+                        </Badge>
+                      </div>
+                    )}
 
-                      {selectedComponent.specs?.tempRange && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Temperature Range
-                          </div>
-                          <div className="text-sm font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.tempRange}
-                          </div>
-                        </div>
-                      )}
+                    {/* Dynamic Specifications Grid - show all available specs */}
+                    <div className="rounded-lg bg-white border border-gray-200 p-4">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                        Specifications
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {Object.entries(selectedComponent.specs || {})
+                          .filter(([key, value]) =>
+                            // Filter out metadata fields and empty values
+                            !['category', 'description', 'datasheetUrl', 'fullSpecs'].includes(key) &&
+                            value !== null &&
+                            value !== undefined &&
+                            value !== ''
+                          )
+                          .map(([key, value]) => {
+                            // Format the key for display (snake_case to Title Case)
+                            const displayKey = key
+                              .replace(/_/g, ' ')
+                              .replace(/\b\w/g, c => c.toUpperCase());
 
-                      {selectedComponent.specs?.package && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Package
-                          </div>
-                          <div className="text-lg font-bold text-gray-900">
-                            {selectedComponent.specs.package}
-                          </div>
-                        </div>
-                      )}
+                            // Format the value
+                            let displayValue = value;
+                            if (typeof value === 'object') {
+                              displayValue = JSON.stringify(value);
+                            }
 
-                      {selectedComponent.specs?.voltage && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Voltage
-                          </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.voltage}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedComponent.specs?.current && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Current
-                          </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.current}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedComponent.specs?.power && (
-                        <div className="rounded-lg bg-white border border-gray-200 p-4">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                            Power
-                          </div>
-                          <div className="text-lg font-bold text-gray-900 font-mono">
-                            {selectedComponent.specs.power}
-                          </div>
-                        </div>
+                            return (
+                              <div key={key} className="rounded-lg bg-gray-50 border border-gray-100 p-3">
+                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                                  {displayKey}
+                                </div>
+                                <div className="text-sm font-bold text-gray-900 font-mono break-words">
+                                  {String(displayValue)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                      {Object.keys(selectedComponent.specs || {}).filter(k =>
+                        !['category', 'description', 'datasheetUrl', 'fullSpecs'].includes(k)
+                      ).length === 0 && (
+                        <p className="text-sm text-gray-500 text-center py-4">
+                          No specifications available for this component
+                        </p>
                       )}
                     </div>
 
-                    {/* Additional Info */}
+                    {/* Datasheet Link */}
                     <div className="rounded-lg bg-gradient-to-r from-blue-100 to-cyan-100 border border-blue-200 p-4">
                       <div className="flex items-start gap-3">
                         <FileText className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
                         <div className="flex-1">
-                          <h4 className="font-semibold text-blue-900 mb-1">Need more information?</h4>
+                          <h4 className="font-semibold text-blue-900 mb-1">Datasheet</h4>
                           <p className="text-sm text-blue-800 mb-3">
                             View the complete datasheet for detailed specifications, performance graphs, and application notes.
                           </p>
