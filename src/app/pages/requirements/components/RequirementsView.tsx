@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, Edit2, X, Check, Zap, Plus, Upload, FileText, Filter, Search, Loader2, Battery, Gauge, Thermometer, Shield, Rocket, Globe, Settings, Cpu } from 'lucide-react';
+import { CheckCircle, Edit2, X, Check, Zap, Plus, Filter, Search, Loader2, Battery, Gauge, Thermometer, Shield, Rocket, Globe, Settings, Cpu, Trash2, ChevronDown } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { getRequirements, getRequirementsGET, updateRequirement, type Requirement as APIRequirement } from '@/app/services/api';
+import { getRequirements, getRequirementsGET, updateRequirement, deleteRequirement, getClassification, type Requirement as APIRequirement } from '@/app/services/api';
 
 interface Requirement {
   id: string;
@@ -28,7 +28,6 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
   const [retryCount, setRetryCount] = useState(0);
   const [activeTab, setActiveTab] = useState<string>('All');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [savingRequirementId, setSavingRequirementId] = useState<string | null>(null);
   const [newRequirement, setNewRequirement] = useState({
@@ -37,6 +36,33 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
     description: '',
     value: ''
   });
+  const [selectedSourceParts, setSelectedSourceParts] = useState<string[]>([]);
+  const [nonAuxiliaryParts, setNonAuxiliaryParts] = useState<string[]>([]);
+  const [showPartDropdown, setShowPartDropdown] = useState(false);
+  const [loadingParts, setLoadingParts] = useState(false);
+  const [customCategory, setCustomCategory] = useState('');
+
+  // Fetch non-auxiliary parts when modal opens
+  useEffect(() => {
+    if (showCreateModal && sessionId && nonAuxiliaryParts.length === 0) {
+      const fetchParts = async () => {
+        setLoadingParts(true);
+        try {
+          const classification = await getClassification(sessionId);
+          const parts = Object.entries(classification.classification_map)
+            .filter(([_, classification]) => classification === 'non-auxiliary')
+            .map(([mpn]) => mpn)
+            .sort();
+          setNonAuxiliaryParts(parts);
+        } catch (error) {
+          console.error('Failed to fetch parts:', error);
+        } finally {
+          setLoadingParts(false);
+        }
+      };
+      fetchParts();
+    }
+  }, [showCreateModal, sessionId, nonAuxiliaryParts.length]);
 
   // Fetch requirements from API
   useEffect(() => {
@@ -186,58 +212,77 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
     );
   };
 
-  const handleCreateRequirement = () => {
-    if (!newRequirement.category || !newRequirement.title || !newRequirement.value) {
+  const handleDelete = async (reqId: string) => {
+    if (!sessionId) {
+      toast.error('No session found');
       return;
     }
-    
-      const requirement: Requirement = {
-        id: `req-custom-${Date.now()}`,
-        category: newRequirement.category,
-        title: newRequirement.title,
-        description: newRequirement.description,
-        value: newRequirement.value,
-        confidence: 100,
-        source: ['CUSTOM_USER_INPUT']
-      };
-    
-    setRequirements(prev => [...prev, requirement]);
-    setNewRequirement({ category: '', title: '', description: '', value: '' });
-    setShowCreateModal(false);
+
+    // Confirm deletion
+    const requirement = requirements.find(req => req.id === reqId);
+    if (!requirement) return;
+
+    try {
+      await deleteRequirement(sessionId, reqId);
+
+      // Remove from local state
+      setRequirements(prev => prev.filter(req => req.id !== reqId));
+      toast.success(`Requirement "${requirement.title}" deleted`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete requirement';
+      toast.error(errorMessage);
+    }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    
-    // Simulate file processing
-    // In a real app, this would parse CSV/Excel/PDF files
-    setTimeout(() => {
-      const uploadedRequirements: Requirement[] = [
-        {
-          id: `req-upload-${Date.now()}-1`,
-          category: 'Performance',
-          title: 'Maximum Response Time',
-          description: 'System must respond within specified time window',
-          value: '<100ms',
-          confidence: 95,
-          source: ['UPLOADED_FILE']
-        },
-        {
-          id: `req-upload-${Date.now()}-2`,
-          category: 'Environmental',
-          title: 'Humidity Range',
-          description: 'Device must operate in specified humidity conditions',
-          value: '10% - 90% RH',
-          confidence: 92,
-          source: ['UPLOADED_FILE']
-        }
-      ];
-      
-      setRequirements(prev => [...prev, ...uploadedRequirements]);
-      setShowUploadModal(false);
-    }, 1000);
+  const getNextRequirementId = () => {
+    // Find the highest REQ number from existing requirements
+    const reqNumbers = requirements
+      .map(r => {
+        const match = r.id.match(/REQ[_-]?(\d+)/i);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter(n => !isNaN(n));
+
+    const maxNum = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
+    const nextNum = maxNum + 1;
+    return `REQ_${String(nextNum).padStart(3, '0')}`;
   };
+
+  const handleCreateRequirement = () => {
+    const finalCategory = newRequirement.category === 'Other' ? customCategory : newRequirement.category;
+
+    if (!finalCategory || !newRequirement.description || !newRequirement.value) {
+      return;
+    }
+
+    const reqId = getNextRequirementId();
+
+    const requirement: Requirement = {
+      id: reqId,
+      category: finalCategory,
+      title: reqId,  // Use the auto-generated ID as title
+      description: newRequirement.description,
+      value: newRequirement.value,
+      confidence: 100,
+      source: selectedSourceParts.length > 0 ? selectedSourceParts : ['CUSTOM_USER_INPUT']
+    };
+
+    setRequirements(prev => [...prev, requirement]);
+    setNewRequirement({ category: '', title: '', description: '', value: '' });
+    setSelectedSourceParts([]);
+    setCustomCategory('');
+    setShowCreateModal(false);
+    toast.success(`Requirement ${reqId} created`);
+  };
+
+  const toggleSourcePart = (mpn: string) => {
+    setSelectedSourceParts(prev =>
+      prev.includes(mpn)
+        ? prev.filter(p => p !== mpn)
+        : [...prev, mpn]
+    );
+  };
+
 
   const categories = Array.from(new Set(requirements.map(req => req.category)));
 
@@ -350,13 +395,6 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
                 <Plus className="h-4 w-4" />
                 Create Custom
               </button>
-              <button
-                onClick={() => setShowUploadModal(true)}
-                className="rounded-lg bg-gray-700 px-4 py-2 text-sm text-white font-medium hover:bg-gray-800 flex items-center gap-2 transition-colors"
-              >
-                <Upload className="h-4 w-4" />
-                Upload File
-              </button>
             </div>
           </div>
 
@@ -465,6 +503,7 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
                         onEdit={() => handleEdit(req.id)}
                         onSaveEdit={(updates) => handleSaveEdit(req.id, updates)}
                         onCancelEdit={() => handleCancelEdit(req.id)}
+                        onDelete={() => handleDelete(req.id)}
                         isSaving={savingRequirementId === req.id}
                       />
                     ))}
@@ -489,7 +528,12 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-8"
-            onClick={() => setShowCreateModal(false)}
+            onClick={() => {
+              setShowCreateModal(false);
+              setShowPartDropdown(false);
+              setSelectedSourceParts([]);
+              setCustomCategory('');
+            }}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -503,7 +547,12 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
                   Create Custom Requirement
                 </h3>
                 <button
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setShowPartDropdown(false);
+                    setSelectedSourceParts([]);
+                    setCustomCategory('');
+                  }}
                   className="rounded-lg p-2 hover:bg-gray-100 transition-colors"
                 >
                   <X className="h-5 w-5 text-gray-500" />
@@ -515,37 +564,43 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
                   <label className="block text-sm font-bold text-gray-700 mb-2">
                     Category *
                   </label>
-                  <select
-                    value={newRequirement.category}
-                    onChange={(e) => setNewRequirement({ ...newRequirement, category: e.target.value })}
-                    className="w-full rounded-lg border-2 border-gray-300 px-4 py-3 focus:border-blue-400 focus:outline-none"
-                  >
-                    <option value="">Select a category...</option>
-                    {categories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                    <option value="Performance">Performance</option>
-                    <option value="Environmental">Environmental</option>
-                    <option value="Other">Other</option>
-                  </select>
+                  <div className="flex gap-2">
+                    <select
+                      value={newRequirement.category}
+                      onChange={(e) => {
+                        setNewRequirement({ ...newRequirement, category: e.target.value });
+                        if (e.target.value !== 'Other') {
+                          setCustomCategory('');
+                        }
+                      }}
+                      className={`rounded-lg border-2 border-gray-300 px-4 py-3 focus:border-blue-400 focus:outline-none ${
+                        newRequirement.category === 'Other' ? 'w-1/3' : 'w-full'
+                      }`}
+                    >
+                      <option value="">Select a category...</option>
+                      {categories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                      <option value="Performance">Performance</option>
+                      <option value="Environmental">Environmental</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    {newRequirement.category === 'Other' && (
+                      <input
+                        type="text"
+                        value={customCategory}
+                        onChange={(e) => setCustomCategory(e.target.value)}
+                        placeholder="Enter category name..."
+                        className="flex-1 rounded-lg border-2 border-gray-300 px-4 py-3 focus:border-blue-400 focus:outline-none"
+                        autoFocus
+                      />
+                    )}
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Title *
-                  </label>
-                  <input
-                    type="text"
-                    value={newRequirement.title}
-                    onChange={(e) => setNewRequirement({ ...newRequirement, title: e.target.value })}
-                    placeholder="e.g., Maximum Operating Voltage"
-                    className="w-full rounded-lg border-2 border-gray-300 px-4 py-3 focus:border-blue-400 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Description
+                    Description *
                   </label>
                   <textarea
                     value={newRequirement.description}
@@ -568,86 +623,119 @@ export function RequirementsView({ onRequirementsComplete }: RequirementsViewPro
                     className="w-full rounded-lg border-2 border-gray-300 px-4 py-3 font-mono focus:border-blue-400 focus:outline-none"
                   />
                 </div>
+
+                {/* Source Components Multi-Select */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Source Components
+                  </label>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowPartDropdown(!showPartDropdown)}
+                      className="w-full rounded-lg border-2 border-gray-300 px-4 py-3 text-left flex items-center justify-between focus:border-blue-400 focus:outline-none bg-white"
+                    >
+                      <span className={selectedSourceParts.length > 0 ? 'text-gray-900' : 'text-gray-500'}>
+                        {loadingParts
+                          ? 'Loading parts...'
+                          : selectedSourceParts.length > 0
+                            ? `${selectedSourceParts.length} component${selectedSourceParts.length > 1 ? 's' : ''} selected`
+                            : 'Select components to map...'}
+                      </span>
+                      <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform ${showPartDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {showPartDropdown && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border-2 border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {loadingParts ? (
+                          <div className="px-4 py-3 text-sm text-gray-500 flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading components...
+                          </div>
+                        ) : nonAuxiliaryParts.length === 0 ? (
+                          <div className="px-4 py-3 text-sm text-gray-500">
+                            No non-auxiliary components found
+                          </div>
+                        ) : (
+                          <>
+                            <div className="px-4 py-2 border-b border-gray-200 bg-gray-50">
+                              <span className="text-xs font-semibold text-gray-600">
+                                Non-Auxiliary Components ({nonAuxiliaryParts.length})
+                              </span>
+                            </div>
+                            {nonAuxiliaryParts.map((mpn) => (
+                              <label
+                                key={mpn}
+                                className="flex items-center gap-3 px-4 py-2 hover:bg-blue-50 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedSourceParts.includes(mpn)}
+                                  onChange={() => toggleSourcePart(mpn)}
+                                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-sm text-gray-900 font-mono">{mpn}</span>
+                              </label>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Selected Parts Tags */}
+                  {selectedSourceParts.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {selectedSourceParts.map((mpn) => (
+                        <span
+                          key={mpn}
+                          className="inline-flex items-center gap-1 rounded-lg bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700"
+                        >
+                          {mpn}
+                          <button
+                            type="button"
+                            onClick={() => toggleSourcePart(mpn)}
+                            className="hover:text-blue-900"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="mt-1 text-xs text-gray-500">
+                    Select one or more components this requirement applies to
+                  </p>
+                </div>
               </div>
 
               <div className="flex gap-3 mt-8">
                 <button
                   onClick={handleCreateRequirement}
-                  disabled={!newRequirement.category || !newRequirement.title || !newRequirement.value}
+                  disabled={
+                    !newRequirement.category ||
+                    (newRequirement.category === 'Other' && !customCategory) ||
+                    !newRequirement.description ||
+                    !newRequirement.value
+                  }
                   className="flex-1 rounded-lg bg-blue-500 px-6 py-3 text-white font-bold hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
                 >
                   <Plus className="h-5 w-5" />
                   Create Requirement
                 </button>
                 <button
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setShowPartDropdown(false);
+                    setSelectedSourceParts([]);
+                    setCustomCategory('');
+                  }}
                   className="px-6 py-3 rounded-lg bg-gray-200 text-gray-700 font-bold hover:bg-gray-300 transition-colors"
                 >
                   Cancel
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {/* Upload File Modal */}
-        {showUploadModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-8"
-            onClick={() => setShowUploadModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-2xl border-2 border-gray-200 p-8 max-w-2xl w-full shadow-2xl"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                  <Upload className="h-6 w-6 text-purple-500" />
-                  Upload Requirements File
-                </h3>
-                <button
-                  onClick={() => setShowUploadModal(false)}
-                  className="rounded-lg p-2 hover:bg-gray-100 transition-colors"
-                >
-                  <X className="h-5 w-5 text-gray-500" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center hover:border-purple-400 hover:bg-purple-50 transition-all">
-                  <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                  <p className="text-sm text-gray-600 mb-4">
-                    Upload a CSV, Excel, or PDF file containing requirements
-                  </p>
-                  <label className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-6 py-3 text-white font-bold hover:bg-purple-600 cursor-pointer transition-colors">
-                    <Upload className="h-5 w-5" />
-                    Choose File
-                    <input
-                      type="file"
-                      accept=".csv,.xlsx,.xls,.pdf"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-
-                <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">
-                  <strong>Supported formats:</strong> CSV, Excel (.xlsx, .xls), PDF
-                  <br />
-                  <strong>Expected columns:</strong> Category, Title, Description, Value
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowUploadModal(false)}
-                className="w-full mt-6 px-6 py-3 rounded-lg bg-gray-200 text-gray-700 font-bold hover:bg-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
             </motion.div>
           </motion.div>
         )}
@@ -666,10 +754,12 @@ interface RequirementCardProps {
   onEdit: () => void;
   onSaveEdit: (updates: { title?: string; description?: string; value?: string }) => void;
   onCancelEdit: () => void;
+  onDelete: () => void;
   isSaving?: boolean;
 }
 
-function RequirementCard({ requirement, onEdit, onSaveEdit, onCancelEdit, isSaving = false }: RequirementCardProps) {
+function RequirementCard({ requirement, onEdit, onSaveEdit, onCancelEdit, onDelete, isSaving = false }: RequirementCardProps) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editTitle, setEditTitle] = useState(requirement.title);
   const [editDescription, setEditDescription] = useState(requirement.description);
   const [editValue, setEditValue] = useState(requirement.value);
@@ -738,14 +828,44 @@ function RequirementCard({ requirement, onEdit, onSaveEdit, onCancelEdit, isSavi
                 Cancel
               </button>
             </div>
+          ) : showDeleteConfirm ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-red-600 font-medium">Delete?</span>
+              <button
+                onClick={() => {
+                  onDelete();
+                  setShowDeleteConfirm(false);
+                }}
+                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs text-white font-medium hover:bg-red-700 flex items-center gap-1.5 transition-all"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Yes
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 font-medium hover:bg-gray-300 flex items-center gap-1.5 transition-all text-xs"
+              >
+                <X className="h-3.5 w-3.5" />
+                No
+              </button>
+            </div>
           ) : (
-            <button
-              onClick={onEdit}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white font-medium hover:bg-blue-700 flex items-center gap-1.5 transition-all"
-            >
-              <Edit2 className="h-3.5 w-3.5" />
-              Edit
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onEdit}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white font-medium hover:bg-blue-700 flex items-center gap-1.5 transition-all"
+              >
+                <Edit2 className="h-3.5 w-3.5" />
+                Edit
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="rounded-lg bg-red-100 px-3 py-1.5 text-xs text-red-700 font-medium hover:bg-red-200 flex items-center gap-1.5 transition-all"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </button>
+            </div>
           )}
         </div>
       </div>

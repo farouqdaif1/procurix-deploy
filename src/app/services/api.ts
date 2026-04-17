@@ -722,6 +722,31 @@ export async function updateRequirement(
     return result;
 }
 
+export interface DeleteRequirementResponse {
+    success: boolean;
+    message: string;
+    req_id: string;
+}
+
+export async function deleteRequirement(
+    sessionId: string,
+    reqId: string
+): Promise<DeleteRequirementResponse> {
+    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements/${reqId}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to delete requirement: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+}
+
 export interface Connection {
     source_part: string;
     target_part: string | null;
@@ -854,17 +879,31 @@ export async function getPartSpecs(sessionId: string): Promise<Record<string, Re
     if (!response.ok) return {};
     const data = await response.json();
     const map: Record<string, Record<string, string>> = {};
-    for (const part of data.results ?? []) {
-        if (!part.mpn || !part.params) continue;
+    for (const part of data.validation_results ?? []) {
+        if (!part.mpn) continue;
         const flat: Record<string, string> = {};
-        for (const [key, val] of Object.entries(part.params as Record<string, unknown>)) {
-            if (val && typeof val === 'object') {
-                const p = val as { display_value?: string; value?: unknown; units?: string };
-                flat[key] = p.display_value ?? (p.value != null ? `${p.value}${p.units ? ' ' + p.units : ''}` : '');
-            } else if (val != null) {
-                flat[key] = String(val);
+
+        // Include top-level fields from validation results
+        if (part.category) flat['Category'] = String(part.category);
+        if (part.description) flat['Description'] = String(part.description);
+        if (part.manufacturer) flat['Manufacturer'] = String(part.manufacturer);
+        if (part.datasheet_url) flat['Datasheet'] = String(part.datasheet_url);
+        if (part.status) flat['Status'] = String(part.status);
+        if (part.source) flat['Source'] = String(part.source);
+        if (part.confidence) flat['Confidence'] = `${Math.round(Number(part.confidence) * 100)}%`;
+
+        // Extract params (the detailed specs)
+        if (part.params) {
+            for (const [key, val] of Object.entries(part.params as Record<string, unknown>)) {
+                if (val && typeof val === 'object') {
+                    const p = val as { display_value?: string; value?: unknown; units?: string };
+                    flat[key] = p.display_value ?? (p.value != null ? `${p.value}${p.units ? ' ' + p.units : ''}` : '');
+                } else if (val != null) {
+                    flat[key] = String(val);
+                }
             }
         }
+
         if (Object.keys(flat).length > 0) map[part.mpn] = flat;
     }
     return map;

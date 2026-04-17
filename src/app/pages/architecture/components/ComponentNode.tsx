@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { ChevronDown, ChevronUp, CheckCircle, AlertCircle } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, Cpu } from 'lucide-react';
 import type { Component } from '@/app/types';
 import { getComponentColor } from '../utils/componentColors';
 
@@ -11,162 +11,131 @@ interface ComponentNodeData extends Component {
   pinout?: Record<string, { name: string; type: string; description: string }>;
 }
 
+// Keys to exclude from the specs display (shown elsewhere or not useful)
+const EXCLUDED_SPEC_KEYS = ['Category', 'Description', 'Manufacturer', 'Datasheet', 'Status', 'Source', 'Confidence'];
+
 export const ComponentNode = (props: NodeProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const data = props.data as unknown as ComponentNodeData;
   const selected = props.selected;
-  
-  
-  // Get color for this component based on partNumber (component_id)
+
   const componentColor = data.componentColor || getComponentColor(data.partNumber || data.id);
 
-  const getComplianceBadge = () => {
-    if (data.complianceStatus === 'compliant') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">
-          <CheckCircle className="h-3 w-3" />
-          Compliant
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-100 text-red-700">
-        <AlertCircle className="h-3 w-3" />
-        {data.complianceStatus}
-      </span>
-    );
-  };
+  // Get category from specs or data
+  const category = data.specs?.Category || data.category;
 
-  const getKeySpecs = () => {
+  // Get manufacturer from specs or data
+  const manufacturer = data.specs?.Manufacturer || data.manufacturer;
+
+  // Get description from specs or data
+  const description = data.specs?.Description || data.description;
+
+  // Get datasheet URL
+  const datasheetUrl = data.specs?.Datasheet;
+
+  // Filter specs for display (exclude meta fields shown elsewhere)
+  const getDisplaySpecs = () => {
+    if (!data.specs) return [];
     return Object.entries(data.specs)
-      .filter(([, v]) => v != null && v !== '')
-      .slice(0, 4)
-      .map(([key, value]) => `${key}: ${value}`);
+      .filter(([key, value]) => !EXCLUDED_SPEC_KEYS.includes(key) && value != null && value !== '')
+      .map(([key, value]) => ({ key, value: String(value) }));
   };
 
-  // Get color for pin type - supports custom types with unique colors
+  // Get key specs for the compact view (first 3 important ones)
+  const getKeySpecs = () => {
+    return getDisplaySpecs().slice(0, 3);
+  };
+
+  // Get color for pin type
   const getPinColor = (pinType: string): string => {
     const type = (pinType || '').toUpperCase();
-    
-    // Default pin type colors
     const defaultColors: Record<string, string> = {
-      'INPUT': '#3b82f6',    // Blue
-      'GROUND': '#6b7280',   // Gray
-      'OUTPUT': '#10b981',   // Green
-      'POWER': '#f59e0b',    // Orange/Amber
-      'ANALOG': '#8b5cf6',   // Purple
-      'DIGITAL': '#ec4899',  // Pink
+      'INPUT': '#3b82f6',
+      'GROUND': '#6b7280',
+      'OUTPUT': '#10b981',
+      'POWER': '#f59e0b',
+      'ANALOG': '#8b5cf6',
+      'DIGITAL': '#ec4899',
     };
-    
-    // Check default colors first
-    if (defaultColors[type]) {
-      return defaultColors[type];
-    }
-    
-    // Load custom pin type colors from localStorage
+
+    if (defaultColors[type]) return defaultColors[type];
+
     try {
       const saved = localStorage.getItem('customPinTypeColors');
       if (saved) {
         const customColors: Record<string, string> = JSON.parse(saved);
-        if (customColors[type]) {
-          return customColors[type];
-        }
+        if (customColors[type]) return customColors[type];
       }
-    } catch (e) {
+    } catch {
       // Ignore localStorage errors
     }
-    
-    // Default gray for unknown types
+
     return '#9ca3af';
   };
 
-  // Generate handles - returns handles separately from pin content
-  // Only generates handles when pins are defined
+  // Generate handles for pins
   const generateHandles = () => {
     const componentId = data.id;
-    
-    // Only generate handles if pins are defined
-    if (!data.pinout || Object.keys(data.pinout).length === 0) {
-      return null;
-    }
+
+    if (!data.pinout || Object.keys(data.pinout).length === 0) return null;
 
     const pins = Object.entries(data.pinout).sort(([a], [b]) => {
       const numA = parseInt(a) || 0;
       const numB = parseInt(b) || 0;
       return numA - numB;
     });
+
     const handles: React.ReactElement[] = [];
     const totalPins = pins.length;
     const pinsPerSide = Math.ceil(totalPins / 2);
-    
-    // Left side handles
+
     const leftPins = pins.slice(0, pinsPerSide);
-    const leftStartPercent = 10;
-    const leftEndPercent = 90;
-    const leftRange = leftEndPercent - leftStartPercent;
+    const rightPins = pins.slice(pinsPerSide);
 
     leftPins.forEach(([pinNumber, pinData], index) => {
       const pin = pinData as { name: string; type: string; description: string };
       const totalLeftPins = leftPins.length;
-      const topOffset = totalLeftPins > 1
-        ? `${leftStartPercent + (index / (totalLeftPins - 1)) * leftRange}%`
-        : '50%';
-      
+      const topOffset = totalLeftPins > 1 ? `${10 + (index / (totalLeftPins - 1)) * 80}%` : '50%';
+
       handles.push(
         <Handle
           key={`handle-left-${pinNumber}`}
           id={`${componentId}-pin-${pinNumber}`}
           type="source"
           position={Position.Left}
-          className="w-4 h-4"
           style={{
             top: topOffset,
-            width: '20px',
-            height: '20px',
+            width: '14px',
+            height: '14px',
             borderRadius: '50%',
             backgroundColor: getPinColor(pin.type),
             border: '2px solid white',
-            boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
           }}
-          data-pin-number={pinNumber}
-          data-pin-name={pin.name}
-          data-pin-type={pin.type}
         />
       );
     });
 
-    // Right side handles
-    const rightPins = pins.slice(pinsPerSide);
-    const rightStartPercent = 10;
-    const rightEndPercent = 90;
-    const rightRange = rightEndPercent - rightStartPercent;
-
     rightPins.forEach(([pinNumber, pinData], index) => {
       const pin = pinData as { name: string; type: string; description: string };
       const totalRightPins = rightPins.length;
-      const topOffset = totalRightPins > 1
-        ? `${rightStartPercent + (index / (totalRightPins - 1)) * rightRange}%`
-        : '50%';
-      
+      const topOffset = totalRightPins > 1 ? `${10 + (index / (totalRightPins - 1)) * 80}%` : '50%';
+
       handles.push(
         <Handle
           key={`handle-right-${pinNumber}`}
           id={`${componentId}-pin-${pinNumber}`}
           type="source"
           position={Position.Right}
-          className="w-4 h-4"
           style={{
             top: topOffset,
-            width: '20px',
-            height: '20px',
+            width: '14px',
+            height: '14px',
             borderRadius: '50%',
             backgroundColor: getPinColor(pin.type),
             border: '2px solid white',
-            boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
           }}
-          data-pin-number={pinNumber}
-          data-pin-name={pin.name}
-          data-pin-type={pin.type}
         />
       );
     });
@@ -174,272 +143,237 @@ export const ComponentNode = (props: NodeProps) => {
     return <>{handles}</>;
   };
 
+  const displaySpecs = getDisplaySpecs();
+  const keySpecs = getKeySpecs();
+
   return (
     <div
-      className={`bg-white rounded-lg shadow-lg border-2 transition-all ${
-        selected ? 'border-blue-500 shadow-xl' : 'border-gray-200'
+      className={`bg-white rounded-xl shadow-md border transition-all duration-200 ${
+        selected ? 'border-blue-500 shadow-lg ring-2 ring-blue-100' : 'border-gray-200 hover:shadow-lg'
       }`}
-      style={{ minWidth: '280px', maxWidth: '320px' }}
+      style={{ minWidth: '260px', maxWidth: '300px' }}
     >
-      {/* Default source/target handles when no pinout defined */}
+      {/* Default handles when no pinout */}
       {(!data.pinout || Object.keys(data.pinout).length === 0) && (
         <>
           <Handle
             type="target"
             position={Position.Top}
             style={{
-              top: 0,
+              top: -6,
               left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: '20px',
-              height: '20px',
+              transform: 'translateX(-50%)',
+              width: '12px',
+              height: '12px',
               borderRadius: '50%',
-              backgroundColor: '#6b7280',
+              backgroundColor: '#94a3b8',
               border: '2px solid white',
-              boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
             }}
           />
           <Handle
             type="source"
             position={Position.Bottom}
             style={{
-              bottom: 0,
+              bottom: -6,
               left: '50%',
-              transform: 'translate(-50%, 50%)',
-              width: '20px',
-              height: '20px',
+              transform: 'translateX(-50%)',
+              width: '12px',
+              height: '12px',
               borderRadius: '50%',
-              backgroundColor: '#6b7280',
+              backgroundColor: '#94a3b8',
               border: '2px solid white',
-              boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
             }}
           />
         </>
       )}
-      
-      {/* Colored Type Section at Top */}
-      <div 
-        className="px-4 py-2 border-b"
-        style={{ 
-          backgroundColor: componentColor.bg,
-          borderColor: componentColor.border 
+
+      {/* Header with colored accent */}
+      <div
+        className="px-4 py-3 rounded-t-xl"
+        style={{
+          background: `linear-gradient(135deg, ${componentColor.bg} 0%, ${componentColor.bg}dd 100%)`,
         }}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold uppercase" style={{ color: componentColor.text }}>
-              {data.type || 'COMPONENT'}
-            </span>
-            {data.pinout && Object.keys(data.pinout).length > 0 && (
-              <span 
-                className="text-xs px-2 py-0.5 rounded font-medium"
-                style={{ 
-                  backgroundColor: componentColor.text,
-                  color: componentColor.bg 
-                }}
-              >
-                {Object.keys(data.pinout).length} Pins
-              </span>
-            )}
-          </div>
-          {data.category && (
-            <span 
-              className="text-xs px-2 py-0.5 rounded font-medium"
-              style={{ 
-                backgroundColor: componentColor.text,
-                color: componentColor.bg 
-              }}
+        {/* Category badge */}
+        {category && (
+          <span
+            className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full mb-2"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.9)',
+              color: componentColor.text,
+            }}
+          >
+            {category}
+          </span>
+        )}
+
+        {/* Part Number - Main title */}
+        <div className="flex items-start gap-2">
+          <Cpu className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: componentColor.text }} />
+          <div className="flex-1 min-w-0">
+            <h3
+              className="font-bold text-sm leading-tight truncate"
+              style={{ color: componentColor.text }}
+              title={data.partNumber}
             >
-              {data.category}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-200">
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex-1">
-            {data.partNumber && (
-              <div className="text-xs font-medium text-gray-600">{data.partNumber}</div>
-            )}
-            {data.reference && (
-              <div className="text-xs text-gray-400 mt-0.5">Ref: {data.reference}</div>
-            )}
-            {data.pinout && Object.keys(data.pinout).length > 0 && (
-              <div className="text-xs text-gray-500 mt-1">
-                Pins: {Object.keys(data.pinout).length}
-              </div>
+              {data.partNumber || data.id}
+            </h3>
+            {manufacturer && (
+              <p
+                className="text-xs mt-0.5 opacity-80"
+                style={{ color: componentColor.text }}
+              >
+                {manufacturer}
+              </p>
             )}
           </div>
-          {getComplianceBadge()}
         </div>
-        
-        {data.manufacturer && (
-          <div className="text-xs text-gray-500">Manufacturer: {data.manufacturer}</div>
-        )}
-        
-        {data.description && (
-          <div className="text-xs text-gray-600 mt-1.5">{data.description}</div>
-        )}
       </div>
 
-      {/* Key Specs */}
-      {getKeySpecs().length > 0 && (
-        <div className="px-4 py-2 border-b border-gray-200">
+      {/* Description */}
+      {description && (
+        <div className="px-4 py-2 border-b border-gray-100">
+          <p className="text-xs text-gray-600 line-clamp-2">{description}</p>
+        </div>
+      )}
+
+      {/* Key Specs as pills */}
+      {keySpecs.length > 0 && (
+        <div className="px-4 py-2 border-b border-gray-100">
           <div className="flex flex-wrap gap-1.5">
-            {getKeySpecs().map((spec, idx) => (
+            {keySpecs.map(({ key, value }) => (
               <span
-                key={idx}
-                className="text-xs px-2 py-0.5 bg-gray-100 text-gray-700 rounded"
+                key={key}
+                className="inline-flex items-center text-[10px] px-2 py-1 bg-slate-100 text-slate-700 rounded-md font-medium"
               >
-                {spec}
+                <span className="text-slate-500 mr-1">{key}:</span>
+                {value}
               </span>
             ))}
           </div>
         </div>
       )}
 
-      {/* Pin Box - All pins appear inside this box */}
-      <div className="relative border-b border-gray-200">
-        {/* Render handles around the border */}
-        {generateHandles()}
-        
-        {/* Pin content inside the box */}
-        <div className="px-4 py-2">
-          {data.pinout && typeof data.pinout === 'object' && Object.keys(data.pinout).length > 0 ? (
-            (() => {
-              const sortedPins = Object.entries(data.pinout).sort(([a], [b]) => {
-                const numA = parseInt(a) || 0;
-                const numB = parseInt(b) || 0;
-                return numA - numB;
-              });
-              
-              // Split pins into left and right sides (same logic as handles)
-              const totalPins = sortedPins.length;
-              const pinsPerSide = Math.ceil(totalPins / 2);
-              const leftPins = sortedPins.slice(0, pinsPerSide);
-              const rightPins = sortedPins.slice(pinsPerSide);
-              
-              return (
-                <div className="grid grid-cols-2 gap-x-4">
-                  {/* Left side pins column */}
-                  <div className="flex flex-col gap-0.5">
-                    {leftPins.map(([pinNumber, pinData]) => {
-                      const pin = pinData as { name: string; type: string; description: string };
-                      return (
-                        <div
-                          key={pinNumber}
-                          className="flex flex-col text-xs"
-                        >
-                          <span className="font-medium text-gray-700">{pin.name}</span>
-                          <span className="text-gray-400 text-xs capitalize">{pin.type.toLowerCase()}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  
-                  {/* Right side pins column */}
-                  <div className="flex flex-col gap-0.5">
-                    {rightPins.map(([pinNumber, pinData]) => {
-                      const pin = pinData as { name: string; type: string; description: string };
-                      return (
-                        <div
-                          key={pinNumber}
-                          className="flex flex-col items-end text-xs"
-                        >
-                          <span className="font-medium text-gray-700">{pin.name}</span>
-                          <span className="text-gray-400 text-xs capitalize">{pin.type.toLowerCase()}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()
-          ) : (
-            <div className="text-xs text-gray-400">No pinout defined</div>
-          )}
+      {/* Pinout section */}
+      {data.pinout && Object.keys(data.pinout).length > 0 && (
+        <div className="relative border-b border-gray-100">
+          {generateHandles()}
+          <div className="px-4 py-2">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Pinout</span>
+              <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">
+                {Object.keys(data.pinout).length} pins
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+              {Object.entries(data.pinout)
+                .sort(([a], [b]) => (parseInt(a) || 0) - (parseInt(b) || 0))
+                .slice(0, 6)
+                .map(([pinNumber, pinData]) => {
+                  const pin = pinData as { name: string; type: string };
+                  return (
+                    <div key={pinNumber} className="flex items-center gap-1.5 text-[10px]">
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: getPinColor(pin.type) }}
+                      />
+                      <span className="text-gray-700 truncate">{pin.name}</span>
+                    </div>
+                  );
+                })}
+              {Object.keys(data.pinout).length > 6 && (
+                <span className="text-[10px] text-gray-400 col-span-2">
+                  +{Object.keys(data.pinout).length - 6} more...
+                </span>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Expandable Details */}
-      <div className="border-b border-gray-200">
+      <div>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="w-full px-4 py-2 flex items-center justify-between text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          className="w-full px-4 py-2 flex items-center justify-between text-xs text-gray-500 hover:bg-gray-50 transition-colors"
         >
-          <span>Details</span>
+          <span className="font-medium">
+            {isExpanded ? 'Hide details' : 'Show details'}
+            {displaySpecs.length > 0 && !isExpanded && (
+              <span className="ml-1 text-gray-400">({displaySpecs.length})</span>
+            )}
+          </span>
           {isExpanded ? (
-            <ChevronUp className="h-4 w-4" />
+            <ChevronUp className="h-3.5 w-3.5" />
           ) : (
-            <ChevronDown className="h-4 w-4" />
+            <ChevronDown className="h-3.5 w-3.5" />
           )}
         </button>
 
         {isExpanded && (
-          <div className="px-4 py-3 bg-gray-50 space-y-2">
-            {/* Basic Information */}
-            {data.specs.package && (
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-500">Package:</span>
-                <span className="text-gray-700 font-medium">{data.specs.package}</span>
-              </div>
-            )}
-            
-            {data.specs.function && (
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-500">Function:</span>
-                <span className="text-gray-700 font-medium">{data.specs.function}</span>
-              </div>
-            )}
-
-            {/* All Specs */}
-            {Object.entries(data.specs).map(([key, value]) => (
-              <div key={key} className="flex justify-between text-xs">
-                <span className="text-gray-500">{key}:</span>
-                <span className="text-gray-700 font-medium">{String(value)}</span>
-              </div>
-            ))}
-
-            {/* Compliance Information */}
-            {data.complianceScore !== undefined && (
-              <div className="pt-2 mt-2 border-t border-gray-300">
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-500">Compliance Score:</span>
-                  <span className="text-gray-700 font-medium">{data.complianceScore}%</span>
-                </div>
-              </div>
+          <div className="px-4 pb-3 space-y-2 max-h-48 overflow-y-auto">
+            {/* Datasheet link */}
+            {datasheetUrl && (
+              <a
+                href={datasheetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="h-3 w-3" />
+                <span>View Datasheet</span>
+              </a>
             )}
 
-            {/* Instance Information */}
-            {data.specs.instance_function && (
-              <div className="pt-2 mt-2 border-t border-gray-300">
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-500">Instance Function:</span>
-                  <span className="text-gray-700 font-medium">{data.specs.instance_function}</span>
-                </div>
-                {data.specs.instance_position && (
-                  <div className="flex justify-between text-xs mt-1">
-                    <span className="text-gray-500">Position:</span>
-                    <span className="text-gray-700 font-medium">{data.specs.instance_position}</span>
+            {/* All specs */}
+            {displaySpecs.length > 0 ? (
+              <div className="space-y-1 pt-1">
+                {displaySpecs.map(({ key, value }) => (
+                  <div key={key} className="flex justify-between items-start text-[11px] py-1 border-b border-gray-100 last:border-0">
+                    <span className="text-gray-500">{key}</span>
+                    <span className="text-gray-800 font-medium text-right ml-2 max-w-[140px] break-words">
+                      {value}
+                    </span>
                   </div>
-                )}
+                ))}
               </div>
+            ) : (
+              !datasheetUrl && (
+                <p className="text-[11px] text-gray-400 italic py-2">No additional specs available</p>
+              )
             )}
           </div>
         )}
       </div>
 
-      {/* Footer with Status */}
-      <div className="px-4 py-2 bg-gray-50 rounded-b-lg">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-gray-500">
-            {data.isIdentified ? 'Identified' : 'Unidentified'}
-          </span>
-          {data.isGeneric && (
-            <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded">
-              Generic
+      {/* Footer */}
+      <div
+        className="px-4 py-2 rounded-b-xl border-t border-gray-100"
+        style={{ backgroundColor: '#fafafa' }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {data.specs?.Status && (
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                data.specs.Status === 'valid'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}>
+                {data.specs.Status === 'valid' ? 'Verified' : data.specs.Status}
+              </span>
+            )}
+            {data.specs?.Confidence && (
+              <span className="text-[10px] text-gray-500">
+                {data.specs.Confidence}
+              </span>
+            )}
+          </div>
+          {data.specs?.Source && (
+            <span className="text-[10px] text-gray-400">
+              via {data.specs.Source}
             </span>
           )}
         </div>
