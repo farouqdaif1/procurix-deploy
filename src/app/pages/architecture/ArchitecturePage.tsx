@@ -92,25 +92,64 @@ export function ArchitecturePage() {
         }
         if (!isCurrent) return;
 
-        // Merge: start from all BOM parts, add any extras found only in connections
-        const uniqueParts = new Set<string>(allPartNumbers);
+        // Build component list from connections (which now use instance IDs like "TPS62840_1")
+        // Each instance becomes a separate node in the architecture view
+        const uniqueInstances = new Set<string>();
         response.connections.forEach((conn: Connection) => {
-          if (conn.source_part) uniqueParts.add(conn.source_part);
-          if (conn.target_part) uniqueParts.add(conn.target_part);
+          if (conn.source_part) uniqueInstances.add(conn.source_part);
+          if (conn.target_part) uniqueInstances.add(conn.target_part);
         });
 
-        // Create Component objects from the full part set
-        const componentsList: Component[] = Array.from(uniqueParts).map((partNumber) => ({
-          id: partNumber,
-          reference: partNumber,
-          partNumber: partNumber,
-          type: 'component',
-          description: `Component ${partNumber}`,
-          specs: specsMap[partNumber] ?? {},
-          isIdentified: true,
-          isGeneric: false,
-          complianceStatus: 'compliant',
-        }));
+        // Helper to extract base MPN from instance_id (e.g., "TPS62840_1" -> "TPS62840")
+        const extractMpn = (instanceId: string): string => {
+          if (instanceId.includes('_')) {
+            const parts = instanceId.split('_');
+            const lastPart = parts[parts.length - 1];
+            if (/^\d+$/.test(lastPart)) {
+              return parts.slice(0, -1).join('_');
+            }
+          }
+          return instanceId;
+        };
+
+        // Helper to extract instance index (e.g., "TPS62840_1" -> 1)
+        const extractInstanceIndex = (instanceId: string): number | null => {
+          if (instanceId.includes('_')) {
+            const parts = instanceId.split('_');
+            const lastPart = parts[parts.length - 1];
+            if (/^\d+$/.test(lastPart)) {
+              return parseInt(lastPart, 10);
+            }
+          }
+          return null;
+        };
+
+        // Create Component objects from instances
+        const componentsList: Component[] = Array.from(uniqueInstances).map((instanceId) => {
+          const baseMpn = extractMpn(instanceId);
+          const instanceIndex = extractInstanceIndex(instanceId);
+          const isInstance = instanceIndex !== null;
+
+          // Get specs using base MPN (specs are shared across instances)
+          const specs = specsMap[baseMpn] ?? {};
+
+          return {
+            id: instanceId,
+            reference: instanceId,
+            partNumber: baseMpn,
+            // Add instance info to display
+            type: isInstance ? `${specs.Category || 'component'} (${instanceIndex})` : 'component',
+            description: specs.Description || `Component ${baseMpn}`,
+            specs: {
+              ...specs,
+              // Add instance-specific display info
+              ...(isInstance ? { 'Instance': `${instanceIndex} of qty` } : {}),
+            },
+            isIdentified: true,
+            isGeneric: false,
+            complianceStatus: 'compliant',
+          };
+        });
 
         // Map connections to ConnectionData format
         const mappedConnections = response.connections
@@ -161,6 +200,9 @@ export function ArchitecturePage() {
           .map((c) => ({
             source_part: c.from,
             target_part: c.to,
+            // Explicitly send instance IDs for instance-based tracking
+            source_instance_id: c.from,
+            target_instance_id: c.to,
             connection_type: c.type || c.connection_type || 'signal',
           }));
         await saveConnections(activeSessionId, payload);

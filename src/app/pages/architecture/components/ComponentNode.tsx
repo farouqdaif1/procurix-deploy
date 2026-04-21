@@ -12,14 +12,24 @@ interface ComponentNodeData extends Component {
 }
 
 // Keys to exclude from the specs display (shown elsewhere or not useful)
-const EXCLUDED_SPEC_KEYS = ['Category', 'Description', 'Manufacturer', 'Datasheet', 'Status', 'Source', 'Confidence'];
+const EXCLUDED_SPEC_KEYS = ['Category', 'Description', 'Manufacturer', 'Datasheet', 'Status', 'Source', 'Confidence', 'Instance'];
 
 export const ComponentNode = (props: NodeProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const data = props.data as unknown as ComponentNodeData;
   const selected = props.selected;
 
-  const componentColor = data.componentColor || getComponentColor(data.partNumber || data.id);
+  // Detect if this is an instance (id ends with _N where N is a number)
+  const instanceMatch = data.id?.match(/_(\d+)$/);
+  const isInstance = !!instanceMatch;
+  const instanceIndex = instanceMatch ? parseInt(instanceMatch[1], 10) : null;
+
+  // Base part number (without instance suffix)
+  const baseMpn = isInstance && data.id
+    ? data.id.replace(/_\d+$/, '')
+    : (data.partNumber || data.id);
+
+  const componentColor = data.componentColor || getComponentColor(baseMpn);
 
   // Get category from specs or data
   const category = data.specs?.Category || data.category;
@@ -196,18 +206,31 @@ export const ComponentNode = (props: NodeProps) => {
           background: `linear-gradient(135deg, ${componentColor.bg} 0%, ${componentColor.bg}dd 100%)`,
         }}
       >
-        {/* Category badge */}
-        {category && (
-          <span
-            className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full mb-2"
-            style={{
-              backgroundColor: 'rgba(255,255,255,0.9)',
-              color: componentColor.text,
-            }}
-          >
-            {category}
-          </span>
-        )}
+        {/* Category and Instance badges */}
+        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+          {category && (
+            <span
+              className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.9)',
+                color: componentColor.text,
+              }}
+            >
+              {category}
+            </span>
+          )}
+          {isInstance && (
+            <span
+              className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: componentColor.text,
+                color: componentColor.bg,
+              }}
+            >
+              #{instanceIndex}
+            </span>
+          )}
+        </div>
 
         {/* Part Number - Main title */}
         <div className="flex items-start gap-2">
@@ -216,9 +239,9 @@ export const ComponentNode = (props: NodeProps) => {
             <h3
               className="font-bold text-sm leading-tight truncate"
               style={{ color: componentColor.text }}
-              title={data.partNumber}
+              title={baseMpn}
             >
-              {data.partNumber || data.id}
+              {baseMpn}
             </h3>
             {manufacturer && (
               <p

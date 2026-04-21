@@ -748,8 +748,15 @@ export async function deleteRequirement(
 }
 
 export interface Connection {
+    // Primary fields (use instance_id when available)
     source_part: string;
     target_part: string | null;
+    // Explicit instance fields
+    source_instance_id?: string;
+    target_instance_id?: string;
+    // Legacy MPN fields (for backward compatibility)
+    source_part_number?: string;
+    target_part_number?: string;
     connection_type: string;
     reasoning: string;
 }
@@ -1010,7 +1017,13 @@ export async function getSubsystemConnections(sessionId: string): Promise<{ succ
 
 export async function saveConnections(
     sessionId: string,
-    connections: Array<{ source_part: string; target_part: string; connection_type: string }>
+    connections: Array<{
+        source_part: string;
+        target_part: string;
+        source_instance_id?: string;
+        target_instance_id?: string;
+        connection_type: string;
+    }>
 ): Promise<{ success: boolean; connections_saved: number }> {
     const response = await fetch(`${BASE_URL}/sessions/${sessionId}/connections`, {
         method: 'PUT',
