@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { CheckCircle, Zap, Loader2, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { analyzeSystem, sendChatMessage, getSystemAnalysis, selectSystemType, type SystemSuggestion } from '@/app/services/api';
+import { analyzeSystem, getSystemAnalysis, selectSystemType, type SystemSuggestion } from '@/app/services/api';
+import { usePipelineStage } from '@/app/shared/usePipelineStage';
+import { useAgent } from '@/app/shared/useAgent';
 
 interface Line {
   id: string;
@@ -31,10 +33,27 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
   const [selected, setSelected]       = useState<number | null>(null);
   const [confirming, setConfirming]   = useState(false);
 
-  // useRef so React StrictMode double-mount doesn't fire init twice
   const initiatedRef = useRef(false);
   const bottomRef    = useRef<HTMLDivElement>(null);
   const inputRef     = useRef<HTMLInputElement>(null);
+  const { run: runStage } = usePipelineStage({ pollIntervalMs: 3000, maxAttempts: 60 });
+
+  const handleToolResult = useCallback((tool: string, data: unknown) => {
+    if (tool === 'generate_suggestions') {
+      const result = data as { mode: string; suggestions: SystemSuggestion[] };
+      if (result?.suggestions) {
+        setSuggestions(result.suggestions);
+        setSelected(null);
+        triggerRefresh();
+      }
+    } else if (tool === 'confirm_system_type') {
+      const result = data as { system_type: string };
+      toast.success(`System type confirmed: ${result.system_type}`);
+      onSystemTypeSelected(result.system_type);
+    }
+  }, [triggerRefresh, onSystemTypeSelected]);
+
+  const agent = useAgent(sessionId ?? '', 'analyze', { onToolResult: handleToolResult });
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -83,8 +102,8 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
     if (!sessionId) return;
     setLoading(true);
     pushSystem('Analyzing system type...');
-    try {
-      const res = await analyzeSystem(sessionId, additionalContext);
+
+    const onReady = (res: { suggestions?: SystemSuggestion[] }) => {
       if (res.suggestions?.length) {
         setSuggestions(res.suggestions);
         const top = res.suggestions[0];
@@ -95,41 +114,40 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
         );
         triggerRefresh();
       }
-    } catch (err: unknown) {
-      pushError(`Failed to start analysis: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    } finally {
       setLoading(false);
       inputRef.current?.focus();
-    }
+    };
+
+    await runStage(
+      () => analyzeSystem(sessionId, additionalContext),
+      () => getSystemAnalysis(sessionId),
+      (res) => {
+        if (res.error) throw new Error(res.error);
+        return !!(res.suggestions?.length);
+      },
+      onReady,
+      (err) => {
+        pushError(`Analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setLoading(false);
+        inputRef.current?.focus();
+      },
+    );
   };
 
-  const refreshSuggestions = async () => {
-    if (!sessionId) return;
-    try {
-      const res = await getSystemAnalysis(sessionId);
-      if (res.success && res.suggestions?.length) {
-        setSuggestions(res.suggestions);
-        triggerRefresh();
-      }
-    } catch (_) {}
-  };
 
   const send = async () => {
     const text = input.trim();
-    if (!text || loading || !sessionId) return;
+    if (!text || agent.loading || !sessionId) return;
 
     pushLine('input', text);
     setInput('');
-    setLoading(true);
 
     try {
-      const res = await sendChatMessage(sessionId, text);
-      pushOutput(res.data);
-      await refreshSuggestions();
+      const res = await agent.send(text);
+      pushOutput(res.message);
     } catch (err: any) {
       pushError(`Error: ${err.message}`);
     } finally {
-      setLoading(false);
       inputRef.current?.focus();
     }
   };
@@ -204,7 +222,7 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
             ))}
           </AnimatePresence>
 
-          {loading && (
+          {(loading || agent.loading) && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -229,10 +247,10 @@ export function AnalysisView({ onSystemTypeSelected }: AnalysisViewProps) {
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
               placeholder="Type a response or ask for different options…"
-              disabled={loading}
+              disabled={loading || agent.loading}
               className="flex-1 bg-transparent font-mono text-sm text-gray-800 placeholder-gray-300 outline-none caret-blue-500 disabled:opacity-40"
             />
-            {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-300 shrink-0" />}
+            {(loading || agent.loading) && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-300 shrink-0" />}
           </div>
           <p className="text-xs text-gray-300 font-mono mt-1.5 pl-5">enter to send</p>
         </div>

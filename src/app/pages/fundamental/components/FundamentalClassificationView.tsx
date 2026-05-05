@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Component } from '@/app/types';
 import type { PartDetail, PartCandidate } from '@/app/services/api';
-import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight, RotateCcw, ExternalLink, ChevronDown } from 'lucide-react';
+import { CheckCircle, Cpu, Zap, AlertCircle, Loader2, Search, X, ArrowRight, RotateCcw, ExternalLink, ChevronDown, RefreshCw, MessageSquare, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useSession } from '@/app/context/SessionContext';
-import { classifyPartsStream, classifyParts, selectPartMatch, getClassification, bulkUpdateClassification, confirmWebPart, saveCustomPart, suggestPartFields } from '@/app/services/api';
+import { classifyPartsStream, selectPartMatch, getClassification, bulkUpdateClassification, confirmWebPart, saveCustomPart, suggestPartFields } from '@/app/services/api';
+import { PartModelDrawer } from '@/app/shared/components/PartModelDrawer';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -177,7 +178,6 @@ function ResearchPhase({ sessionId, onComplete, setCurrentStage }: {
           setError(event.message);
         }
       },
-      setCurrentStage,
     ).catch(e => setError(String(e)));
   }, []);
 
@@ -573,13 +573,17 @@ function ClassifyPhase({ initialParts, onComplete }: {
   const [localComponents, setLocalComponents] = useState<Component[]>(() =>
     initialParts.map(toComponent)
   );
-  const [partDetailMap] = useState<Record<string, PartDetail>>(() => {
+  const [partDetailMap, setPartDetailMap] = useState<Record<string, PartDetail>>(() => {
     const m: Record<string, PartDetail> = {};
     initialParts.forEach(p => { m[p.part_number] = p; });
     return m;
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [isApplying, setIsApplying] = useState(false);
+  const [isReclassifying, setIsReclassifying] = useState(false);
+  const [showContextInput, setShowContextInput] = useState(false);
+  const [contextHint, setContextHint] = useState('');
+  const [modelDrawerMpn, setModelDrawerMpn] = useState<string | null>(null);
   const originalRef = useRef<Record<string, 'auxiliary' | 'non-auxiliary' | null>>({});
 
   useEffect(() => {
@@ -632,7 +636,37 @@ function ClassifyPhase({ initialParts, onComplete }: {
     }
   };
 
-  const PartCard = ({ comp, side }: { comp: Component; side: 'fund' | 'aux' }) => {
+  const handleReclassify = async () => {
+    if (!sessionId) return;
+    setIsReclassifying(true);
+    setShowContextInput(false);
+    try {
+      await classifyPartsStream(
+        sessionId,
+        (event) => {
+          if (event.type === 'error') {
+            toast.error(String(event.message ?? 'Classification failed'));
+          } else if (event.type === 'complete') {
+            const result = event.result as { parts: PartDetail[] };
+            const parts = result?.parts ?? [];
+            const newMap: Record<string, PartDetail> = {};
+            parts.forEach(p => { newMap[p.part_number] = p; });
+            setPartDetailMap(newMap);
+            setLocalComponents(parts.map(toComponent));
+            parts.forEach(p => { originalRef.current[p.part_number] = p.classification ?? null; });
+            toast.success('Re-classification complete');
+          }
+        },
+        { contextHint },
+      );
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setIsReclassifying(false);
+    }
+  };
+
+  const PartCard = ({ comp, side, onOpenModel }: { comp: Component; side: 'fund' | 'aux'; onOpenModel?: () => void }) => {
     const detail = comp.partNumber ? partDetailMap[comp.partNumber] : null;
     const [expanded, setExpanded] = useState(false);
     const hasCandidates = (detail?.candidates?.length ?? 0) > 1;
@@ -663,6 +697,15 @@ function ClassifyPhase({ initialParts, onComplete }: {
                   {detail!.candidates.length} matches <ChevronDown className={`h-2.5 w-2.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 </button>
               )}
+              {side === 'fund' && onOpenModel && (
+                <button
+                  onClick={e => { e.stopPropagation(); onOpenModel(); }}
+                  className="text-[10px] text-blue-500 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full flex items-center gap-0.5 hover:bg-blue-100 transition-colors"
+                  title="View part model"
+                >
+                  <Database className="h-2.5 w-2.5" /> Model
+                </button>
+              )}
             </div>
             {detail?.category && <div className="text-[11px] text-gray-500 mt-0.5 truncate">{detail.category}</div>}
             {detail?.description && detail.description !== comp.partNumber && (
@@ -683,7 +726,7 @@ function ClassifyPhase({ initialParts, onComplete }: {
         {expanded && hasCandidates && (
           <div className="mt-2 pt-2 border-t border-gray-100 space-y-1" onClick={e => e.stopPropagation()}>
             {detail!.candidates.map((c, i) => (
-              <div key={c.mpn} className={`text-[11px] rounded px-2 py-1 ${i === 0 ? 'bg-blue-50 text-blue-800' : 'text-gray-600'}`}>
+              <div key={`${c.mpn ?? 'unknown'}-${i}`} className={`text-[11px] rounded px-2 py-1 ${i === 0 ? 'bg-blue-50 text-blue-800' : 'text-gray-600'}`}>
                 <span className="font-mono font-medium">{c.mpn}</span>
                 {c.category && <span className="text-gray-500 ml-1">· {c.category}</span>}
                 {c.is_exact_match && <span className="ml-1 text-green-600">✓ exact</span>}
@@ -721,7 +764,50 @@ function ClassifyPhase({ initialParts, onComplete }: {
             </button>
           )}
         </div>
+        <button
+          onClick={() => setShowContextInput(v => !v)}
+          disabled={isReclassifying}
+          className="shrink-0 flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 border border-gray-200 hover:border-blue-300 rounded-lg px-2.5 py-1.5 transition-colors disabled:opacity-40"
+        >
+          {isReclassifying
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Classifying…</>
+            : <><RefreshCw className="h-3.5 w-3.5" /> Re-classify</>}
+        </button>
       </div>
+
+      {/* Re-classify context panel */}
+      <AnimatePresence>
+        {showContextInput && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="shrink-0 overflow-hidden border-b bg-blue-50"
+          >
+            <div className="px-6 py-3 flex items-center gap-3">
+              <MessageSquare className="h-4 w-4 text-blue-500 shrink-0" />
+              <input
+                type="text"
+                value={contextHint}
+                onChange={e => setContextHint(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleReclassify()}
+                placeholder="Optional: describe the system to guide classification (e.g. 'autonomous robot for warehouse logistics')"
+                className="flex-1 text-xs bg-white border border-blue-200 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-400"
+                autoFocus
+              />
+              <button
+                onClick={handleReclassify}
+                className="shrink-0 text-xs bg-blue-600 text-white rounded-lg px-3 py-1.5 hover:bg-blue-700 font-medium"
+              >
+                Run
+              </button>
+              <button onClick={() => setShowContextInput(false)} className="shrink-0 text-gray-400 hover:text-gray-600">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Unclassified queue */}
       {unclassified.length > 0 && (
@@ -783,7 +869,12 @@ function ClassifyPhase({ initialParts, onComplete }: {
               </div>
             ) : (
               filterComps(fundamentalComponents).map(comp => (
-                <PartCard key={comp.id} comp={comp} side="fund" />
+                <PartCard
+                  key={comp.id}
+                  comp={comp}
+                  side="fund"
+                  onOpenModel={comp.partNumber ? () => setModelDrawerMpn(comp.partNumber!) : undefined}
+                />
               ))
             )}
           </div>
@@ -847,6 +938,16 @@ function ClassifyPhase({ initialParts, onComplete }: {
           </button>
         )}
       </div>
+
+      {/* Part model drawer — mounted outside the scroll containers */}
+      {sessionId && (
+        <PartModelDrawer
+          mpn={modelDrawerMpn ?? ''}
+          designId={sessionId}
+          isOpen={modelDrawerMpn !== null}
+          onClose={() => setModelDrawerMpn(null)}
+        />
+      )}
     </div>
   );
 }
@@ -882,8 +983,12 @@ export function FundamentalClassificationView({
           if (forceClassifyPhase) {
             const allNull = Object.values(result.classification_map).every(v => v === null);
             if (allNull) {
-              // Auto-classify via agent, then reload
-              await classifyParts(sessionId);
+              // SSE stream — no artificial timeout, resolves when Gemini finishes
+              let streamError: string | null = null;
+              await classifyPartsStream(sessionId, (event) => {
+                if (event.type === 'error') streamError = String(event.message ?? 'Classification failed');
+              });
+              if (streamError) throw new Error(streamError);
               if (!isCurrent) return;
               const refreshed = await getClassification(sessionId);
               if (!isCurrent) return;

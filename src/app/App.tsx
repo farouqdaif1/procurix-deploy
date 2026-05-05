@@ -8,6 +8,7 @@ import { UploadPage } from './pages/upload/UploadPage';
 import { ValidatePage } from './pages/validate/validatePage';
 import { FundamentalPage } from './pages/fundamental/FundamentalPage';
 import { ClassificationPage } from './pages/classification/ClassificationPage';
+import { EnrichmentPage } from './pages/enrichment/EnrichmentPage';
 import { AnalysisPage } from './pages/analysis/AnalysisPage';
 import { ArchitecturePage } from './pages/architecture/ArchitecturePage';
 import { RequirementsPage } from './pages/requirements/RequirementsPage';
@@ -32,6 +33,8 @@ export default function App() {
           <Route path="/system-identification" element={<Layout showStageIndicator={true}><AnalysisPage /></Layout>} />
           {/* Step 4: Aux/Non-Aux Classification */}
           <Route path="/classification" element={<Layout showStageIndicator={true}><ClassificationPage /></Layout>} />
+          {/* Step 5: Part Model Enrichment */}
+          <Route path="/enrichment" element={<Layout showStageIndicator={true}><EnrichmentPage /></Layout>} />
           <Route path="/validate" element={<Layout showStageIndicator={true}><ValidatePage /></Layout>} />
           <Route path="/requirements" element={<Layout showStageIndicator={true}><RequirementsPage /></Layout>} />
           <Route path="/architecture" element={<Layout showStageIndicator={true}><ArchitecturePage /></Layout>} />

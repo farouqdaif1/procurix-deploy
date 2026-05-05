@@ -1,11 +1,11 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
-import type { UploadBOMResponse } from '@/app/services/api';
+import type { UploadResponse } from '@/app/services/api';
 
 interface SessionContextType {
   sessionId: string | null;
   setSessionId: (sessionId: string | null) => void;
-  uploadData: UploadBOMResponse | null;
-  setUploadData: (data: UploadBOMResponse | null) => void;
+  uploadData: UploadResponse | null;
+  setUploadData: (data: UploadResponse | null) => void;
   currentStage: number | null;
   setCurrentStage: (stage: number | null) => void;
   // Increments every time chat changes backend state — pages watch this to re-fetch
@@ -17,10 +17,20 @@ interface SessionContextType {
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
+const SESSION_KEY = 'procurix_session_id';
+
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [uploadData, setUploadData] = useState<UploadBOMResponse | null>(null);
+  const [sessionId, setSessionIdState] = useState<string | null>(
+    () => localStorage.getItem(SESSION_KEY),
+  );
+  const [uploadData, setUploadData] = useState<UploadResponse | null>(null);
   const [currentStage, setCurrentStage] = useState<number | null>(null);
+
+  const setSessionId = useCallback((id: string | null) => {
+    setSessionIdState(id);
+    if (id) localStorage.setItem(SESSION_KEY, id);
+    else localStorage.removeItem(SESSION_KEY);
+  }, []);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const triggerRefresh = useCallback(() => {

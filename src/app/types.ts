@@ -1,7 +1,7 @@
 // Core Types for BOM Evolution Platform
 // Updated: Force rebuild
 
-export type SessionStage = 'overview' | 'upload' | 'discovery' | 'validate' | 'part-identification' | 'system-identification' | 'classification' | 'architecture' | 'requirements' | 'subsystems' | 'compliance' | 'review';
+export type SessionStage = 'overview' | 'upload' | 'discovery' | 'validate' | 'part-identification' | 'system-identification' | 'classification' | 'enrichment' | 'architecture' | 'requirements' | 'subsystems' | 'compliance' | 'review';
 
 export type ComplianceStatus = 'compliant' | 'failed' | 'partial' | 'unknown';
 
@@ -157,4 +157,83 @@ export interface IdentificationResult {
   specs?: any;
   datasheetUrl?: string;
   error?: string;
+}
+
+// ── Part Model types ──────────────────────────────────────────────────────────
+// Field names mirror the backend Pydantic classes in model_extraction_service.py exactly.
+
+export type PinDirection = 'input' | 'output' | 'bidirectional' | 'power' | 'ground' | 'analog' | 'nc';
+export type LogicFamily = 'push_pull' | 'open_drain' | 'ttl' | 'cmos' | 'analog' | 'power';
+export type InterfaceRole = 'master' | 'slave' | 'either';
+
+export interface PartPin {
+  number: string;
+  name: string;
+  direction: PinDirection;      // matches Pin.direction (not "type")
+  function: string;              // matches Pin.function (not "description")
+  voltage_domain: string | null;
+  logic_family: LogicFamily | null;
+  voltage_level: string | null;
+  protocols: string[];
+  pull: string | null;
+  notes: string | null;
+}
+
+export interface PartInterface {
+  type: string;
+  instance: string;              // matches Interface.instance (not "name")
+  role: InterfaceRole | null;
+  pins: string[];
+  voltage_domain: string | null;
+  max_speed: string | null;
+  address: string | null;
+  channels: number | null;
+  notes: string | null;
+}
+
+export interface PowerDomain {
+  name: string;
+  voltage_min: number | null;
+  voltage_typ: number | null;
+  voltage_max: number | null;
+  supply_pins: string[];
+  required_decoupling: string[];  // List[str] in backend, not string | null
+  quiescent_current_typ: string | null;
+  notes: string | null;
+}
+
+export interface PartPowerProfile {
+  power_domains: PowerDomain[];
+  active_current_typ: string | null;   // matches PowerProfile.active_current_typ
+  sleep_current_typ: string | null;    // matches PowerProfile.sleep_current_typ
+}
+
+export interface PartSpec {
+  name: string;
+  value: string;
+  units: string | null;          // matches Spec.units (not "unit")
+  conditions: string | null;
+}
+
+export interface ConnectivityConstraint {
+  applies_to: string;            // matches ConnectivityConstraint.applies_to
+  requirement: string;
+  reason: string | null;
+  schematic_note: string | null;
+}
+
+export interface CompatibleDevice {
+  category: string;
+  interface: string | null;      // Optional in backend
+  note: string | null;
+}
+
+export interface PartModelData {
+  interfaces: PartInterface[];
+  power: PartPowerProfile;
+  key_specs: PartSpec[];
+  absolute_max: PartSpec[];             // List[Spec] in backend
+  constraints: ConnectivityConstraint[]; // List[ConnectivityConstraint] in backend
+  typical_application_notes: string[];
+  compatible_with: CompatibleDevice[];
 }

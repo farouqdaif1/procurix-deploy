@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import type { PartCandidate } from '@/app/services/api';
+import type { PartCandidate, WebCandidate } from '@/app/services/api';
 import {
   CheckCircle,
   ChevronDown,
@@ -17,6 +17,8 @@ import {
   ExternalLink,
   AlertCircle,
   ArrowRight,
+  Upload,
+  X,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -26,6 +28,7 @@ import {
   selectPartMatch,
   confirmWebPart,
   saveCustomPart,
+  renamePart,
   suggestPartFields,
 } from '@/app/services/api';
 
@@ -52,20 +55,16 @@ interface IdentifiedPart {
   confidence?: string;
   candidates?: PartCandidate[];
   impact_level?: 'low' | 'high';
-  params?: Record<string, { display_value?: string; value?: unknown; units?: string }>;
+  params?: Record<string, string>;
 }
 
-/** A part that needs user action (multi_match / web_found / not_found). */
+/** A part that needs user action (web_found / not_found). */
 interface ActionPart {
   mpn: string;
-  status: 'multi_match' | 'web_found' | 'not_found';
+  status: 'web_found' | 'not_found';
   description?: string | null;
-  datasheet_url?: string | null;
-  product_url?: string | null;
   source?: string;
-  confidence?: string;
-  candidates?: PartCandidate[];
-  impact_level?: 'low' | 'high';
+  webCandidates?: WebCandidate[];
 }
 
 export interface PartIdentificationViewProps {
@@ -94,6 +93,77 @@ function srcBadge(source: string | undefined | null) {
     <span className={`inline-block border text-[10px] font-medium px-1.5 py-0.5 rounded ${cls}`}>
       {label[source] ?? source}
     </span>
+  );
+}
+
+// ── Datasheet upload field ─────────────────────────────────────────────────────
+
+function DatasheetUploadField({
+  file,
+  url,
+  accentColor = 'blue',
+  onFileChange,
+  onUrlChange,
+}: {
+  file: File | null;
+  url: string;
+  accentColor?: 'blue' | 'purple';
+  onFileChange: (f: File | null) => void;
+  onUrlChange: (u: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const ring = accentColor === 'purple' ? 'focus:ring-purple-400' : 'focus:ring-blue-400';
+  const btnCls = accentColor === 'purple'
+    ? 'bg-purple-50 text-purple-600 border-purple-200 hover:bg-purple-100'
+    : 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100';
+
+  return (
+    <div className="col-span-2 space-y-2">
+      <label className="text-[11px] text-gray-500 block">Datasheet</label>
+      {/* URL row */}
+      <input
+        type="text"
+        value={url}
+        disabled={!!file}
+        onChange={e => onUrlChange(e.target.value)}
+        placeholder="https://…/datasheet.pdf"
+        className={`w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 ${ring} disabled:bg-gray-50 disabled:text-gray-400`}
+      />
+      {/* Upload row */}
+      <div className="flex items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".pdf,application/pdf"
+          className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0] ?? null;
+            onFileChange(f);
+            if (f) onUrlChange('');
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className={`flex items-center gap-1.5 text-xs border px-3 py-1.5 rounded-lg font-medium transition-colors ${btnCls}`}
+        >
+          <Upload className="h-3 w-3" />
+          {file ? 'Replace PDF' : 'Upload PDF'}
+        </button>
+        {file && (
+          <div className="flex items-center gap-1 text-xs text-gray-700 min-w-0">
+            <span className="truncate max-w-[160px]">{file.name}</span>
+            <button
+              type="button"
+              onClick={() => { onFileChange(null); if (inputRef.current) inputRef.current.value = ''; }}
+              className="text-gray-400 hover:text-red-500 shrink-0"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -134,16 +204,14 @@ function ResearchPhase({
       (event) => {
         if (event.type === 'start') {
           setTotal(event.total);
-          push({ id: 'start', icon: 'check', text: event.message });
+          push({ id: 'start', icon: 'check', text: `Identifying ${event.total} distinct parts…` });
         } else if (event.type === 'searching') {
           push({ id: event.mpn, icon: 'spin', text: 'Looking up', mpn: event.mpn });
-        } else if (event.type === 'exact_match') {
-          const meta = [event.category, event.candidates?.[0]?.manufacturer]
-            .filter(Boolean).join(' · ');
+        } else if (event.type === 'found') {
           replace(event.mpn, {
             icon: 'check',
             text: event.category || 'identified',
-            meta,
+            meta: event.category ?? undefined,
             source: event.source,
           });
           identifiedRef.current.push({
@@ -152,51 +220,30 @@ function ResearchPhase({
             category: event.category,
             description: event.description,
             datasheet_url: event.datasheet_url,
+            product_url: event.product_url,
+            params: event.params ?? undefined,
             source: event.source,
-            confidence: event.confidence,
-            candidates: event.candidates,
-            impact_level: event.impact_level,
-            params: event.params,
-          });
-        } else if (event.type === 'multi_match') {
-          replace(event.mpn, {
-            icon: 'miss',
-            text: `${event.candidate_count} candidates — pick one`,
-            source: event.source,
-          });
-          needsActionRef.current.push({
-            mpn: event.mpn,
-            status: 'multi_match',
-            source: event.source,
-            candidates: event.candidates,
-            impact_level: event.impact_level,
           });
         } else if (event.type === 'web_found') {
           replace(event.mpn, {
             icon: 'web',
-            text: event.datasheet_url ? 'datasheet found — confirm' : 'web reference — confirm',
+            text: `${event.candidates.length} web candidate${event.candidates.length !== 1 ? 's' : ''} — confirm`,
             source: event.source,
           });
           needsActionRef.current.push({
             mpn: event.mpn,
             status: 'web_found',
-            description: event.description,
-            datasheet_url: event.datasheet_url,
-            product_url: event.product_url,
-            confidence: event.confidence,
             source: event.source,
-            impact_level: event.impact_level,
+            webCandidates: event.candidates,
           });
         } else if (event.type === 'not_found') {
           replace(event.mpn, { icon: 'miss', text: 'not found — add manually' });
           needsActionRef.current.push({ mpn: event.mpn, status: 'not_found' });
         } else if (event.type === 'complete') {
-          const idCount = identifiedRef.current.length;
-          const actCount = needsActionRef.current.length;
           push({
             id: 'done',
             icon: 'check',
-            text: `Done — ${idCount} identified, ${actCount} need review`,
+            text: `Done — ${event.identified}/${event.total} identified`,
           });
           setDone(true);
           setTimeout(
@@ -301,43 +348,33 @@ function ReviewPhase({
   // override: user chose a different candidate for an identified part
   const [identifiedOverrides, setIdentifiedOverrides] = useState<Record<string, number>>({});
 
-  // ── Multi-match state ──
-  const [multiSel, setMultiSel] = useState<Record<string, number>>(() =>
-    Object.fromEntries(
-      needsAction.filter(a => a.status === 'multi_match').map(a => [a.mpn, 0])
-    )
-  );
-
-  // ── Web-found state ──
-  const [webSel, setWebSel] = useState<Record<string, 'confirmed' | 'skipped' | null>>(() =>
+  // ── Web-found state — track which candidate index was picked ──
+  const [webSel, setWebSel] = useState<Record<string, number | 'skipped' | null>>(() =>
     Object.fromEntries(
       needsAction.filter(a => a.status === 'web_found').map(a => [a.mpn, null])
     )
   );
 
-  // ── Not-found custom forms ──
+  // ── Custom entry forms — shared by not_found and skipped web_found ──
   interface CustomFields {
     description: string; manufacturer: string; category: string;
-    datasheet_url: string; extraFields: Record<string, string>;
+    datasheet_url: string; datasheetFile: File | null;
+    extraFields: Record<string, string>;
     suggestedFields: string[]; loadingFields: boolean;
   }
+  const emptyForm = (): CustomFields => ({
+    description: '', manufacturer: '', category: '', datasheet_url: '',
+    datasheetFile: null, extraFields: {}, suggestedFields: [], loadingFields: false,
+  });
   const [customForms, setCustomForms] = useState<Record<string, CustomFields>>(() =>
-    Object.fromEntries(
-      needsAction.filter(a => a.status === 'not_found').map(a => [
-        a.mpn,
-        { description: '', manufacturer: '', category: '', datasheet_url: '',
-          extraFields: {}, suggestedFields: [], loadingFields: false },
-      ])
-    )
+    Object.fromEntries(needsAction.map(a => [a.mpn, emptyForm()]))
   );
 
   const [saving, setSaving] = useState(false);
 
-  const multiMatch = needsAction.filter(a => a.status === 'multi_match');
-  const webFound   = needsAction.filter(a => a.status === 'web_found');
-  const notFound   = needsAction.filter(a => a.status === 'not_found');
+  const webFound = needsAction.filter(a => a.status === 'web_found');
+  const notFound = needsAction.filter(a => a.status === 'not_found');
 
-  // Validation: all web-found must be confirmed or skipped
   const webPending = webFound.filter(a => webSel[a.mpn] === null).length;
   const canProceed = webPending === 0;
 
@@ -360,14 +397,6 @@ function ReviewPhase({
     if (!sessionId || !canProceed) return;
     setSaving(true);
     try {
-      // Save multi-match selections (action-required)
-      for (const a of multiMatch) {
-        const candidates = a.candidates ?? [];
-        const idx = multiSel[a.mpn] ?? 0;
-        if (candidates[idx]) {
-          await selectPartMatch(sessionId, a.mpn, candidates[idx]);
-        }
-      }
       // Save identified-part overrides (if user picked a different candidate)
       for (const p of identified) {
         const overrideIdx = identifiedOverrides[p.mpn];
@@ -375,19 +404,25 @@ function ReviewPhase({
           await selectPartMatch(sessionId, p.mpn, p.candidates[overrideIdx]);
         }
       }
-      // Save web-found confirmations
+      // Save web-found confirmations — user picked a specific candidate index
       for (const a of webFound) {
-        if (webSel[a.mpn] === 'confirmed') {
-          await confirmWebPart(
-            sessionId, a.mpn,
-            a.product_url ?? null, a.datasheet_url ?? null, a.description ?? null, null
-          );
+        const sel = webSel[a.mpn];
+        if (typeof sel === 'number') {
+          const cand = a.webCandidates?.[sel];
+          if (cand) {
+            await confirmWebPart(sessionId, a.mpn, cand.product_url ?? null, cand.datasheet_url ?? null, cand.description ?? null);
+          }
         }
       }
-      // Save custom parts
-      for (const a of notFound) {
+      // Save custom parts — not_found and skipped web_found
+      const partsForCustomSave = [
+        ...notFound,
+        ...webFound.filter(a => webSel[a.mpn] === 'skipped'),
+      ];
+      for (const a of partsForCustomSave) {
         const form = customForms[a.mpn];
         const hasAny = form.description || form.manufacturer || form.category ||
+          form.datasheetFile || form.datasheet_url ||
           Object.values(form.extraFields).some(Boolean);
         if (hasAny) {
           await saveCustomPart(sessionId, a.mpn, {
@@ -396,6 +431,7 @@ function ReviewPhase({
             category: form.category || undefined,
             datasheet_url: form.datasheet_url || undefined,
             specs: Object.fromEntries(Object.entries(form.extraFields).filter(([, v]) => v)),
+            datasheetFile: form.datasheetFile ?? undefined,
           });
         }
       }
@@ -497,25 +533,26 @@ function ReviewPhase({
                     {/* Expanded: show specs + candidates to pick */}
                     {isOpen && (
                       <div className="px-4 pb-4 pt-1 border-t border-gray-100">
-                        {p.datasheet_url && (
+                        {(p.datasheet_url || p.product_url) && (
                           <a
-                            href={p.datasheet_url}
+                            href={(p.datasheet_url || p.product_url)!}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 mb-3"
                           >
-                            <ExternalLink className="h-3 w-3" /> View datasheet
+                            <ExternalLink className="h-3 w-3" />
+                            {p.datasheet_url ? 'View datasheet' : 'View product page'}
                           </a>
                         )}
-                        {p.params && Object.keys(p.params).length > 0 && (
+                        {p.params && Object.values(p.params).some(Boolean) && (
                           <div className="mb-3">
                             <div className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold mb-1.5">Technical Specifications</div>
                             <div className="grid grid-cols-2 gap-1">
-                              {Object.entries(p.params).map(([key, spec]) => (
+                              {Object.entries(p.params).filter(([, v]) => v).map(([key, spec]) => (
                                 <div key={key} className="flex items-center justify-between bg-gray-50 rounded px-2 py-1">
                                   <span className="text-[11px] text-gray-500 truncate mr-2">{key}</span>
                                   <span className="text-[11px] font-semibold text-gray-800 shrink-0">
-                                    {spec.display_value ?? (spec.value != null ? `${spec.value}${spec.units ? ' ' + spec.units : ''}` : '—')}
+                                    {spec || '—'}
                                   </span>
                                 </div>
                               ))}
@@ -578,10 +615,19 @@ function ReviewPhase({
                           </div>
                         ) : (
                           <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-                            Single match — {p.candidates?.[0]?.manufacturer && (
-                              <span>{p.candidates[0].manufacturer} · </span>
+                            {p.datasheet_url ? (
+                              <a href={p.datasheet_url} target="_blank" rel="noopener noreferrer"
+                                className="text-blue-500 hover:underline flex items-center gap-0.5">
+                                <ExternalLink className="h-3 w-3" /> View datasheet
+                              </a>
+                            ) : p.product_url ? (
+                              <a href={p.product_url} target="_blank" rel="noopener noreferrer"
+                                className="text-blue-500 hover:underline flex items-center gap-0.5">
+                                <ExternalLink className="h-3 w-3" /> View product page
+                              </a>
+                            ) : (
+                              <span>Identified via {p.source ?? 'catalog'}</span>
                             )}
-                            conf: {parseFloat(p.confidence ?? '0').toFixed(2)}
                           </div>
                         )}
                       </div>
@@ -593,162 +639,136 @@ function ReviewPhase({
           </section>
         )}
 
-        {/* ══ Section 2: Multi-match — pick candidate ══════════════════════════ */}
-        {multiMatch.length > 0 && (
-          <section>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-yellow-500" />
-              Multiple matches — select one ({multiMatch.length})
-            </h3>
-            <div className="space-y-4">
-              {multiMatch.map(a => (
-                <div key={a.mpn} className="bg-white border border-yellow-200 rounded-xl p-5 shadow-sm">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="font-mono font-bold text-gray-900">{a.mpn}</span>
-                    {srcBadge(a.source)}
-                  </div>
-                  <div className="space-y-1.5">
-                    {(a.candidates ?? []).map((c, i) => (
-                      <button
-                        key={c.mpn}
-                        onClick={() => setMultiSel(prev => ({ ...prev, [a.mpn]: i }))}
-                        className={`w-full text-left rounded-lg border p-3 transition-all ${
-                          multiSel[a.mpn] === i
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 hover:border-blue-300'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="font-mono text-sm font-semibold text-gray-900">{c.mpn}</div>
-                            {c.category && <div className="text-xs text-gray-600 mt-0.5">{c.category}</div>}
-                            {c.description && (
-                              <div className="text-xs text-gray-400 truncate">{c.description}</div>
-                            )}
-                            {c.manufacturer && (
-                              <div className="text-xs text-gray-500 mt-1">{c.manufacturer}</div>
-                            )}
-                          </div>
-                          <div className="shrink-0 flex flex-col items-end gap-1">
-                            {c.is_exact_match && (
-                              <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">
-                                exact
-                              </span>
-                            )}
-                            {c.datasheet_url && (
-                              <a
-                                href={c.datasheet_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={e => e.stopPropagation()}
-                                className="text-xs text-blue-500 hover:underline flex items-center gap-0.5"
-                              >
-                                <ExternalLink className="h-3 w-3" /> datasheet
-                              </a>
-                            )}
-                            {multiSel[a.mpn] === i && (
-                              <CheckCircle className="h-4 w-4 text-blue-500" />
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* ══ Section 3: Web-found — confirm reference ════════════════════════ */}
+        {/* ══ Section 2: Web-found — pick a source or enter manually ════════════ */}
         {webFound.length > 0 && (
           <section>
             <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
               <span className="text-purple-500 font-bold text-base">⌂</span>
-              Found via web — confirm or skip ({webFound.length})
+              Web sources found — select or enter manually ({webFound.length})
             </h3>
-            <div className="space-y-3">
-              {webFound.map(a => (
-                <div
-                  key={a.mpn}
-                  className={`bg-white border rounded-xl p-4 shadow-sm transition-all ${
-                    webSel[a.mpn] === 'confirmed'
-                      ? 'border-green-300'
-                      : webSel[a.mpn] === 'skipped'
-                      ? 'border-gray-200 opacity-60'
-                      : 'border-purple-200'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
+            <div className="space-y-4">
+              {webFound.map(a => {
+                const skipped = webSel[a.mpn] === 'skipped';
+                const form = customForms[a.mpn];
+                return (
+                  <div key={a.mpn} className="bg-white border border-purple-200 rounded-xl p-4 shadow-sm">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-gray-900">{a.mpn}</span>
                         {srcBadge(a.source)}
-                        <span className="text-xs text-gray-400">
-                          conf: {parseFloat(a.confidence ?? '0').toFixed(2)}
-                        </span>
+                        <span className="text-xs text-gray-400">— not in Nexar</span>
                       </div>
-                      {a.description && (
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{a.description}</p>
-                      )}
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {a.datasheet_url && (
-                          <a
-                            href={a.datasheet_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-blue-600 hover:underline flex items-center gap-0.5 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded"
-                          >
-                            <ExternalLink className="h-3 w-3" /> Datasheet
-                          </a>
-                        )}
-                        {a.product_url && (
-                          <a
-                            href={a.product_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-gray-600 hover:underline flex items-center gap-0.5 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded"
-                          >
-                            <ExternalLink className="h-3 w-3" /> Product page
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
                       <button
-                        onClick={() => setWebSel(prev => ({ ...prev, [a.mpn]: 'confirmed' }))}
-                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
-                          webSel[a.mpn] === 'confirmed'
-                            ? 'bg-green-600 text-white'
-                            : 'bg-green-50 text-green-700 border border-green-300 hover:bg-green-100'
-                        }`}
-                      >
-                        {webSel[a.mpn] === 'confirmed' ? '✓ Confirmed' : 'Confirm'}
-                      </button>
-                      <button
-                        onClick={() => setWebSel(prev => ({ ...prev, [a.mpn]: 'skipped' }))}
-                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
-                          webSel[a.mpn] === 'skipped'
+                        onClick={() => setWebSel(prev => ({
+                          ...prev,
+                          [a.mpn]: skipped ? null : 'skipped',
+                        }))}
+                        className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-all ${
+                          skipped
                             ? 'bg-gray-400 text-white'
                             : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100'
                         }`}
                       >
-                        Skip
+                        {skipped ? 'Undo skip' : 'Enter manually'}
                       </button>
                     </div>
+
+                    {/* Candidate list — hidden when manually entering */}
+                    {!skipped && (
+                      <div className="space-y-1.5">
+                        {(a.webCandidates ?? []).map((c, i) => (
+                          <button
+                            key={`${c.mpn}-${i}`}
+                            onClick={() => setWebSel(prev => ({ ...prev, [a.mpn]: i }))}
+                            className={`w-full text-left rounded-lg border px-3 py-2.5 transition-all ${
+                              webSel[a.mpn] === i
+                                ? 'border-purple-500 bg-purple-50'
+                                : 'border-gray-200 hover:border-purple-300'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                {c.description && (
+                                  <div className="text-xs text-gray-800 font-medium line-clamp-2 mb-1">
+                                    {c.description}
+                                  </div>
+                                )}
+                                {(c.datasheet_url || c.product_url) && (
+                                  <a
+                                    href={(c.datasheet_url || c.product_url)!}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={e => e.stopPropagation()}
+                                    className="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5"
+                                  >
+                                    <ExternalLink className="h-2.5 w-2.5" />
+                                    {c.datasheet_url ? 'Datasheet PDF' : 'Product page'}
+                                  </a>
+                                )}
+                              </div>
+                              <div className="shrink-0 flex flex-col items-end gap-1">
+                                <span className="text-[10px] text-purple-600 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded">
+                                  {Math.round(c.confidence * 100)}%
+                                </span>
+                                {webSel[a.mpn] === i && <CheckCircle className="h-3.5 w-3.5 text-purple-500" />}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Inline manual form — shown when skipped */}
+                    {skipped && (
+                      <div className="mt-2 border-t border-gray-100 pt-3">
+                        <p className="text-xs text-gray-500 mb-3">
+                          Custom/classified — stays in your design only.
+                        </p>
+                        <div className="grid grid-cols-2 gap-3 mb-3">
+                          {(['description', 'manufacturer', 'category'] as const).map(field => (
+                            <div key={field} className={field === 'description' ? 'col-span-2' : ''}>
+                              <label className="text-[11px] text-gray-500 mb-0.5 block capitalize">{field}</label>
+                              <input
+                                type="text"
+                                value={form[field]}
+                                onChange={e => setCustomForms(prev => ({
+                                  ...prev,
+                                  [a.mpn]: { ...prev[a.mpn], [field]: e.target.value },
+                                }))}
+                                placeholder={`Enter ${field}`}
+                                className="w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-400"
+                              />
+                            </div>
+                          ))}
+                          <DatasheetUploadField
+                            file={form.datasheetFile}
+                            url={form.datasheet_url}
+                            accentColor="purple"
+                            onFileChange={f => setCustomForms(prev => ({
+                              ...prev, [a.mpn]: { ...prev[a.mpn], datasheetFile: f, datasheet_url: '' },
+                            }))}
+                            onUrlChange={u => setCustomForms(prev => ({
+                              ...prev, [a.mpn]: { ...prev[a.mpn], datasheet_url: u, datasheetFile: null },
+                            }))}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
 
-        {/* ══ Section 4: Not found — manual entry ════════════════════════════ */}
+        {/* ══ Section 4: Not found — manual entry (custom/classified) ══════════ */}
         {notFound.length > 0 && (
           <section>
             <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-red-400" />
               Not found — enter specs manually or skip ({notFound.length})
+              <span className="text-xs text-gray-400 font-normal">Custom/classified parts stay in your design only</span>
             </h3>
             <div className="space-y-4">
               {notFound.map(a => {
@@ -762,11 +782,9 @@ function ReviewPhase({
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-3 mb-3">
-                      {(['description', 'manufacturer', 'category', 'datasheet_url'] as const).map(field => (
+                      {(['description', 'manufacturer', 'category'] as const).map(field => (
                         <div key={field} className={field === 'description' ? 'col-span-2' : ''}>
-                          <label className="text-[11px] text-gray-500 mb-0.5 block capitalize">
-                            {field.replace('_', ' ')}
-                          </label>
+                          <label className="text-[11px] text-gray-500 mb-0.5 block capitalize">{field}</label>
                           <input
                             type="text"
                             value={form[field]}
@@ -776,11 +794,22 @@ function ReviewPhase({
                                 [a.mpn]: { ...prev[a.mpn], [field]: e.target.value },
                               }))
                             }
-                            placeholder={field === 'datasheet_url' ? 'https://…' : `Enter ${field}`}
+                            placeholder={`Enter ${field}`}
                             className="w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
                           />
                         </div>
                       ))}
+                      <DatasheetUploadField
+                        file={form.datasheetFile}
+                        url={form.datasheet_url}
+                        accentColor="blue"
+                        onFileChange={f => setCustomForms(prev => ({
+                          ...prev, [a.mpn]: { ...prev[a.mpn], datasheetFile: f, datasheet_url: '' },
+                        }))}
+                        onUrlChange={u => setCustomForms(prev => ({
+                          ...prev, [a.mpn]: { ...prev[a.mpn], datasheet_url: u, datasheetFile: null },
+                        }))}
+                      />
                     </div>
                     {form.suggestedFields.length > 0 && (
                       <div className="grid grid-cols-2 gap-2 mb-3">

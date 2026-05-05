@@ -1,1399 +1,676 @@
-const BASE_URL = 'http://localhost:8000/api';
+const BASE_URL = 'http://localhost:8090/api';
 
-export interface CreateSessionResponse {
-    session_id: string;
-    user_id: string;
-    current_state: string;
-    available_actions: string[];
+// ── Verbose fetch wrapper ─────────────────────────────────────────────────────
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+    const method = init?.method ?? 'GET';
+    const t0 = performance.now();
+
+    let bodyPreview = '';
+    if (init?.body) {
+        if (typeof init.body === 'string') bodyPreview = init.body.slice(0, 300);
+        else if (init.body instanceof FormData) bodyPreview = '[FormData]';
+        else bodyPreview = '[binary]';
+    }
+    console.log(`%c>> ${method} ${url}`, 'color:#4ade80;font-weight:bold', bodyPreview || '');
+
+    const response = await fetch(url, init);
+    const elapsed = (performance.now() - t0).toFixed(0);
+    const color = response.ok ? '#4ade80' : '#f87171';
+
+    response.clone().json().then(data => {
+        console.log(`%c<< ${response.status} ${method} ${url}  (${elapsed}ms)`, `color:${color};font-weight:bold`, data);
+    }).catch(() => {
+        console.log(`%c<< ${response.status} ${method} ${url}  (${elapsed}ms)`, `color:${color};font-weight:bold`);
+    });
+
+    return response;
+}
+
+async function apiJSON<T>(url: string, init?: RequestInit): Promise<T> {
+    const res = await apiFetch(url, init);
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`${res.status} ${text}`);
+    }
+    return res.json();
+}
+
+// ── Core types ────────────────────────────────────────────────────────────────
+
+export interface Design {
+    id: string;
+    project_name: string | null;
+    user_id: string | null;
+    fsm_state: string;
+    workflow_status: string;
     created_at: string;
 }
 
-export async function createSession(userId?: string): Promise<CreateSessionResponse> {
-    const response = await fetch(`${BASE_URL}/sessions`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            user_id: userId || 'user_123',
-            initial_state: {},
-        }),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create session: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
+export interface DesignPart {
+    id: string;
+    mpn: string | null;
+    selected_mpn: string | null;
+    manufacturer: string | null;
+    quantity: number;
+    designator: string | null;
+    component_id: string | null;
+    instance_index: number;
+    identification_status: string | null;
+    classification: string | null;
+    category: string | null;
+    suggestions_json: Record<string, unknown> | null;
 }
 
-export interface UploadBOMResponse {
-    success: boolean;
-    bom_name: string;
-    parts_count: number;
-    total_quantity: number;
-    parts_preview: Array<{
-        part_number: string;
-        manufacturer: string;
-        quantity: number;
-    }>;
+export interface UploadResponse {
+    design_id: string;
+    fsm_state: string;
+    part_count: number;
+    message: string;
 }
 
-export async function uploadBOM(
-    sessionId: string,
-    file: File,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<UploadBOMResponse> {
-    const formData = new FormData();
-    formData.append('file', file);
+// Alias so older components that import UploadBOMResponse still compile
+export type UploadBOMResponse = UploadResponse;
 
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/upload-bom`, {
-        method: 'POST',
-        body: formData,
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to upload BOM: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful POST
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after BOM upload:', err)
-        );
-    }
-
-    return result;
+export interface WebCandidate {
+    mpn: string;
+    manufacturer?: string | null;
+    description?: string | null;
+    datasheet_url?: string | null;
+    product_url?: string | null;
+    category?: string | null;
+    source: string;
+    confidence: number;
 }
+
+export type IdentifyStreamEvent =
+    | { type: 'start'; total: number }
+    | { type: 'searching'; mpn: string }
+    | { type: 'found'; mpn: string; source: string; category: string | null; description: string | null; datasheet_url?: string | null; product_url?: string | null; params?: Record<string, string> | null }
+    | { type: 'web_found'; mpn: string; source: string; candidates: WebCandidate[] }
+    | { type: 'not_found'; mpn: string; status: string }
+    | { type: 'complete'; identified: number; total: number }
+    | { type: 'error'; message: string };
+
+// ── Phase 4+ types (stubs — filled in as phases complete) ─────────────────────
 
 export interface PartCandidate {
     mpn: string;
-    manufacturer: string | null;
-    category: string | null;
-    description: string | null;
-    datasheet_url: string | null;
-    is_exact_match: boolean;
-    confidence: number;
-    params?: Record<string, unknown>;
+    manufacturer?: string | null;
+    category?: string | null;
+    description?: string | null;
+    datasheet_url?: string | null;
+    product_url?: string | null;
+    is_exact_match?: boolean;
 }
 
 export interface PartDetail {
     part_number: string;
-    manufacturer: string | null;
-    quantity: number | null;
-    classification: 'auxiliary' | 'non-auxiliary' | null;
-    category: string | null;
-    description: string | null;
-    source: 'nexar' | 'web' | 'web_broad' | 'web_confirmed' | 'tavily' | 'combined' | 'unknown' | 'nexar_confirmed' | 'cache' | 'user_provided' | null;
+    manufacturer?: string | null;
+    category?: string | null;
+    description?: string | null;
+    datasheet_url?: string | null;
+    source: string;
     confidence: number;
     needs_review: boolean;
-    datasheet_url: string | null;
     candidates: PartCandidate[];
-}
-
-export interface ClassifyPartsResponse {
-    success: boolean;
-    total_parts: number;
-    auxiliary_parts: number;
-    non_auxiliary_parts: number;
-    classification_map: Record<string, 'auxiliary' | 'non-auxiliary' | null>;
-    parts?: PartDetail[];
-}
-
-export async function classifyParts(
-    sessionId: string,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<ClassifyPartsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/classify`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to classify parts: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful POST
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after classification:', err)
-        );
-    }
-
-    return result;
-}
-
-// SSE streaming classify — calls /classify/stream and yields parsed events
-export type ClassifyStreamEvent =
-  | { type: 'start'; total: number; message: string }
-  | { type: 'searching'; mpn: string; message: string }
-  // Legacy event types (still supported by server for cache hits)
-  | { type: 'cached'; mpn: string; category: string | null; description: string | null; source: string; candidates: PartCandidate[] }
-  | { type: 'found'; mpn: string; category: string | null; description: string | null; source: string; is_exact_match: boolean; candidates: PartCandidate[] }
-  // New enrichment cascade event types
-  | { type: 'exact_match'; mpn: string; category: string | null; description: string | null; source: string; confidence: string; datasheet_url: string | null; candidates: PartCandidate[]; params: Record<string, unknown> }
-  | { type: 'multi_match'; mpn: string; description: string | null; source: string; candidates: PartCandidate[]; candidate_count: number }
-  | { type: 'web_found'; mpn: string; description: string | null; datasheet_url: string | null; product_url: string | null; confidence: string; source: string }
-  | { type: 'not_found'; mpn: string; message: string }
-  | { type: 'classifying'; message: string }
-  | { type: 'complete'; result: ClassifyPartsResponse }
-  | { type: 'error'; message: string };
-
-export async function classifyPartsStream(
-    sessionId: string,
-    onEvent: (event: ClassifyStreamEvent) => void,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<ClassifyPartsResponse | null> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/classify/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Classify stream failed: ${response.status} ${text}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let finalResult: ClassifyPartsResponse | null = null;
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-                const event: ClassifyStreamEvent = JSON.parse(line.slice(6));
-                onEvent(event);
-                if (event.type === 'complete') {
-                    finalResult = event.result;
-                    if (setCurrentStage) {
-                        updateCurrentStageInContext(sessionId, setCurrentStage).catch(() => {});
-                    }
-                }
-            } catch {
-                // ignore malformed events
-            }
-        }
-    }
-
-    return finalResult;
-}
-
-// SSE streaming for Part Identification step (runs BEFORE system analysis)
-export type IdentifyPartsStreamEvent =
-  | { type: 'start'; total: number; message: string }
-  | { type: 'searching'; mpn: string }
-  | { type: 'exact_match'; mpn: string; category: string | null; description: string | null; source: string; confidence: string; datasheet_url: string | null; candidates: PartCandidate[]; params: Record<string, unknown>; impact_level: 'low' | 'high' }
-  | { type: 'multi_match'; mpn: string; description: string | null; source: string; candidates: PartCandidate[]; candidate_count: number; impact_level: 'low' | 'high' }
-  | { type: 'web_found'; mpn: string; description: string | null; datasheet_url: string | null; product_url: string | null; confidence: string; source: string; impact_level: 'low' | 'high' }
-  | { type: 'not_found'; mpn: string; message: string }
-  | { type: 'complete'; parts_identified: number; not_found: number }
-  | { type: 'error'; message: string };
-
-export async function identifyPartsStream(
-    sessionId: string,
-    onEvent: (event: IdentifyPartsStreamEvent) => void,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<void> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/identify-parts/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Identify parts stream failed: ${response.status} ${text}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-                const event: IdentifyPartsStreamEvent = JSON.parse(line.slice(6));
-                onEvent(event);
-                if (event.type === 'complete' && setCurrentStage) {
-                    updateCurrentStageInContext(sessionId, setCurrentStage).catch(() => {});
-                }
-            } catch {
-                // ignore malformed events
-            }
-        }
-    }
-}
-
-export async function selectPartMatch(
-    sessionId: string,
-    mpn: string,
-    candidate: PartCandidate
-): Promise<void> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/select-part-match`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            mpn,
-            selected_mpn: candidate.mpn,
-            selected_manufacturer: candidate.manufacturer,
-            selected_category: candidate.category,
-            selected_description: candidate.description,
-            selected_datasheet_url: candidate.datasheet_url,
-            selected_params: candidate.params ?? {},
-        }),
-    });
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`selectPartMatch failed: ${response.status} ${text}`);
-    }
-}
-
-export async function confirmWebPart(
-    sessionId: string,
-    mpn: string,
-    confirmedUrl: string | null,
-    datasheetUrl: string | null,
-    description: string | null,
-    manufacturer: string | null,
-): Promise<{ success: boolean; enrichment_queued: boolean }> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/web-part-confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mpn, confirmed_url: confirmedUrl, datasheet_url: datasheetUrl, description, manufacturer }),
-    });
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`confirmWebPart failed: ${response.status} ${text}`);
-    }
-    return response.json();
-}
-
-export async function saveCustomPart(
-    sessionId: string,
-    mpn: string,
-    fields: { manufacturer?: string; description?: string; category?: string; datasheet_url?: string; specs?: Record<string, string> }
-): Promise<{ success: boolean }> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/custom-part`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mpn, ...fields }),
-    });
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`saveCustomPart failed: ${response.status} ${text}`);
-    }
-    return response.json();
-}
-
-export async function suggestPartFields(
-    sessionId: string,
-    mpn: string,
-    description: string | null,
-    category: string | null,
-): Promise<string[]> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/suggest-part-fields`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mpn, description, category }),
-    });
-    if (!response.ok) return ['description', 'voltage', 'current', 'package'];
-    const data = await response.json();
-    return data.suggested_fields ?? [];
-}
-
-export async function startEnrichFundamentals(
-    sessionId: string,
-): Promise<{ success: boolean; queued: string[]; count: number }> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/enrich-fundamentals`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-    });
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`enrich-fundamentals failed: ${response.status} ${text}`);
-    }
-    return response.json();
-}
-
-export interface EnrichmentStatusResponse {
-    success: boolean;
-    statuses: Record<string, 'pending' | 'enriching' | 'done' | 'failed' | 'user_provided'>;
-    all_done: boolean;
-    total: number;
-    done_count: number;
-}
-
-export async function getEnrichmentStatus(sessionId: string): Promise<EnrichmentStatusResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/enrichment-status`);
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`enrichment-status failed: ${response.status} ${text}`);
-    }
-    return response.json();
-}
-
-export interface UpdateClassificationResponse {
-    success: boolean;
-    message: string;
-    mpn: string;
-    old_classification: 'auxiliary' | 'non-auxiliary';
-    new_classification: 'auxiliary' | 'non-auxiliary';
-    statistics: {
-        total_parts: number;
-        exempt_count: number;
-        candidates_count: number;
-    };
-}
-
-export async function updateClassification(
-    sessionId: string,
-    mpn: string,
-    newClassification: 'auxiliary' | 'non-auxiliary',
-    setCurrentStage?: (stage: number | null) => void
-): Promise<UpdateClassificationResponse> {
-    // Validate inputs
-    if (!mpn || mpn.trim() === '') {
-        throw new Error('MPN (Manufacturer Part Number) is required');
-    }
-
-    if (newClassification !== 'auxiliary' && newClassification !== 'non-auxiliary') {
-        throw new Error(`Invalid classification: ${newClassification}. Must be 'auxiliary' or 'non-auxiliary'`);
-    }
-
-    const requestBody = {
-        mpn: mpn.trim(),
-        new_classification: newClassification,
-    };
-
-    console.log('Update classification request:', { sessionId, ...requestBody });
-
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/update-classification`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Update classification error:', { status: response.status, errorText, requestBody });
-        throw new Error(`Failed to update classification: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful PUT
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after classification update:', err)
-        );
-    }
-
-    return result;
-}
-
-export interface BulkUpdateClassificationRequest {
-    parts: Array<{
-        mpn: string;
-        new_classification: 'auxiliary' | 'non-auxiliary';
-    }>;
-}
-
-export interface BulkUpdateClassificationResponse {
-    success: boolean;
-    message: string;
-    updated_count: number;
-    statistics: {
-        total_parts: number;
-        exempt_count: number;
-        candidates_count: number;
-    };
-}
-
-export async function bulkUpdateClassification(
-    sessionId: string,
-    parts: Array<{ mpn: string; new_classification: 'auxiliary' | 'non-auxiliary' }>,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<BulkUpdateClassificationResponse> {
-    // Validate inputs
-    if (!parts || parts.length === 0) {
-        throw new Error('At least one part is required for bulk update');
-    }
-
-    // Validate each part
-    for (const part of parts) {
-        if (!part.mpn || part.mpn.trim() === '') {
-            throw new Error('MPN (Manufacturer Part Number) is required for all parts');
-        }
-        if (part.new_classification !== 'auxiliary' && part.new_classification !== 'non-auxiliary') {
-            throw new Error(`Invalid classification: ${part.new_classification}. Must be 'auxiliary' or 'non-auxiliary'`);
-        }
-    }
-
-    const requestBody: BulkUpdateClassificationRequest = {
-        parts: parts.map(part => ({
-            mpn: part.mpn.trim(),
-            new_classification: part.new_classification,
-        })),
-    };
-
-    console.log('Bulk update classification request:', { sessionId, partsCount: parts.length });
-
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/update-classification`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Bulk update classification error:', { status: response.status, errorText, requestBody });
-        throw new Error(`Failed to bulk update classification: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful PUT
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after bulk classification update:', err)
-        );
-    }
-
-    return result;
+    classification?: string | null;
+    instance_function?: string | null;
 }
 
 export interface SystemSuggestion {
     systemType: string;
     primaryFunction: string;
-    keyArchitecturalClues: string[];
-    likelyApplicationDomains: string[];
     confidence: 'high' | 'medium' | 'low';
+    keyArchitecturalClues: string[];
     reasoning: string;
-}
-
-export interface AnalyzeResponse {
-    success: boolean;
-    session_id: string;
-    suggestions: SystemSuggestion[];
-}
-
-export async function analyzeSystem(
-    sessionId: string,
-    additionalContext?: string,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<AnalyzeResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/analyze`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            ...(additionalContext && additionalContext.trim() ? { additional_context: additionalContext.trim() } : {}),
-        }),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to analyze system: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful POST
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after system analysis:', err)
-        );
-    }
-
-    return result;
-}
-
-export interface SelectSystemTypeResponse {
-    success: boolean;
-    session_id: string;
-    selected_system_type: string;
-}
-
-export async function selectSystemType(
-    sessionId: string,
-    selectedIndex: number,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<SelectSystemTypeResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/select-system-type`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            selected_index: selectedIndex,
-        }),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to select system type: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful POST
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after system type selection:', err)
-        );
-    }
-
-    return result;
+    suggestedStandards: string[];
 }
 
 export interface ValidationResult {
     mpn: string;
-    manufacturer: string | null;
-    quantity: number | null;
-    status: 'valid' | 'unresolved';
-    confidence: number;
-    source: string | null;
-    category: string | null;
-    description: string | null;
-    datasheet_url: string | null;
-    params: Record<string, { display_value?: string | null; value?: string | null; si_value?: string | null; units?: string | null }>;
-    pricing: { per_1000?: number | null };
-    availability: { total_avail?: number | null; lead_time_days?: number | null };
-    candidates: PartCandidate[];
-    suggestions: any[];
-    message: string;
-}
-
-export interface ValidateResponse {
-    success: boolean;
-    total_parts: number;
-    valid_parts: number;
-    invalid_parts: number;
-    validation_results: ValidationResult[];
-    auxiliary_parts_skipped: number;
-}
-
-export async function validateParts(
-    sessionId: string,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<ValidateResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/validate`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({}),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to validate parts: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful POST
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after validation:', err)
-        );
-    }
-
-    return result;
-}
-
-export interface Requirement {
-    req_id: string;
-    original_req_id: string;
-    description: string;
-    category: string;
-    bom_reference: string[];
-    specification?: string;
-}
-
-export interface RequirementsResponse {
-    success: boolean;
-    session_id: string;
-    requirements_count: number;
-    requirements: Requirement[];
-}
-
-export async function getRequirements(
-    sessionId: string,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<RequirementsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({}),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get requirements: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful POST
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after requirements generation:', err)
-        );
-    }
-
-    return result;
-}
-
-export interface UpdateRequirementResponse {
-    success: boolean;
-    message: string;
-    requirement: {
-        req_id: string;
-        description: string;
-        category: string;
-        bom_reference: string[];
-        specification?: string;
-    };
-}
-
-export async function updateRequirement(
-    sessionId: string,
-    reqId: string,
-    description: string,
-    category: string,
-    bomReference: string[],
-    setCurrentStage?: (stage: number | null) => void
-): Promise<UpdateRequirementResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements/${reqId}`, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            description: description,
-            category: category,
-            bom_reference: bomReference,
-        }),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to update requirement: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful PUT
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after requirement update:', err)
-        );
-    }
-
-    return result;
-}
-
-export interface DeleteRequirementResponse {
-    success: boolean;
-    message: string;
-    req_id: string;
-}
-
-export async function deleteRequirement(
-    sessionId: string,
-    reqId: string
-): Promise<DeleteRequirementResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements/${reqId}`, {
-        method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to delete requirement: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
+    status: string;
+    issues?: string[];
+    category?: string | null;
+    description?: string | null;
+    datasheet_url?: string | null;
 }
 
 export interface Connection {
-    // Primary fields (use instance_id when available)
-    source_part: string;
-    target_part: string | null;
-    // Explicit instance fields
-    source_instance_id?: string;
-    target_instance_id?: string;
-    // Legacy MPN fields (for backward compatibility)
-    source_part_number?: string;
-    target_part_number?: string;
-    connection_type: string;
-    reasoning: string;
-}
-
-export interface AnalyzeConnectionsResponse {
-    success: boolean;
-    bom_id: string;
-    connections_analyzed: number;
-    connections_saved: number;
-    connections: Connection[];
-}
-
-export async function analyzeConnections(
-    sessionId: string,
-    setCurrentStage?: (stage: number | null) => void
-): Promise<AnalyzeConnectionsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/analyze-connections`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to analyze connections: ${response.status} ${errorText}`);
-    }
-
-    const result = await response.json();
-
-    // Update current stage after successful POST
-    if (setCurrentStage) {
-        updateCurrentStageInContext(sessionId, setCurrentStage).catch(err =>
-            console.error('Error updating stage after connection analysis:', err)
-        );
-    }
-
-    return result;
-}
-
-export interface BOMListItem {
-    bom_id: string;
-    session_id: string;
-    system_type: string;
-    total_parts: number;
-    created_at: string;
-    current_stage: number;
-}
-
-export interface GetAllBOMsResponse {
-    success: boolean;
-    boms_count: number;
-    boms: BOMListItem[];
-}
-
-export async function getAllBOMs(): Promise<GetAllBOMsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/boms`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to fetch BOMs: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export async function getBOMBySessionId(sessionId: string): Promise<BOMListItem | null> {
-    try {
-        const response = await getAllBOMs();
-        const bom = response.boms.find(b => b.session_id === sessionId);
-        return bom || null;
-    } catch (error) {
-        console.error('Error fetching BOM by session ID:', error);
-        return null;
-    }
-}
-
-export interface CurrentStageResponse {
-    stage: number;
-    stage_name: string;
-    can_proceed: boolean;
-    is_complete: boolean;
-}
-
-export async function getCurrentStage(sessionId: string): Promise<CurrentStageResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/current-stage`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get current stage: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-/**
- * Helper function to update the current stage in context after a successful update
- * Call this after any POST/PUT request that might advance the stage
- */
-export async function updateCurrentStageInContext(
-    sessionId: string,
-    setCurrentStage: (stage: number | null) => void
-): Promise<void> {
-    try {
-        const stageData = await getCurrentStage(sessionId);
-        setCurrentStage(stageData.stage);
-    } catch (error) {
-        console.error('Error fetching current stage after update:', error);
-        // Don't throw - this is a background update that shouldn't block the flow
-    }
-}
-
-// GET endpoints for fetching existing data
-
-export async function getPartSpecs(sessionId: string): Promise<Record<string, Record<string, string>>> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/validation-results`);
-    if (!response.ok) return {};
-    const data = await response.json();
-    const map: Record<string, Record<string, string>> = {};
-    for (const part of data.validation_results ?? []) {
-        if (!part.mpn) continue;
-        const flat: Record<string, string> = {};
-
-        // Include top-level fields from validation results
-        if (part.category) flat['Category'] = String(part.category);
-        if (part.description) flat['Description'] = String(part.description);
-        if (part.manufacturer) flat['Manufacturer'] = String(part.manufacturer);
-        if (part.datasheet_url) flat['Datasheet'] = String(part.datasheet_url);
-        if (part.status) flat['Status'] = String(part.status);
-        if (part.source) flat['Source'] = String(part.source);
-        if (part.confidence) flat['Confidence'] = `${Math.round(Number(part.confidence) * 100)}%`;
-
-        // Extract params (the detailed specs)
-        if (part.params) {
-            for (const [key, val] of Object.entries(part.params as Record<string, unknown>)) {
-                if (val && typeof val === 'object') {
-                    const p = val as { display_value?: string; value?: unknown; units?: string };
-                    flat[key] = p.display_value ?? (p.value != null ? `${p.value}${p.units ? ' ' + p.units : ''}` : '');
-                } else if (val != null) {
-                    flat[key] = String(val);
-                }
-            }
-        }
-
-        if (Object.keys(flat).length > 0) map[part.mpn] = flat;
-    }
-    return map;
-}
-
-export async function getClassification(sessionId: string): Promise<ClassifyPartsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/classification`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get classification: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export interface SystemAnalysisResponse {
-    success: boolean;
-    session_id: string;
-    suggestions: SystemSuggestion[];
-}
-
-export interface GetSystemAnalysisResponse {
-    success: boolean;
-    system_analysis: {
-        system_type: string;
-        primary_function: string;
-        architectural_clues: string[];
-        application_domains: string[];
-    };
-}
-
-export async function getSystemAnalysis(sessionId: string): Promise<SystemAnalysisResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/system-analysis`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    // 404 means analysis hasn't run yet — return empty rather than throwing
-    if (response.status === 404) {
-        return { success: false, session_id: sessionId, suggestions: [] };
-    }
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get system analysis: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export async function getValidationResults(sessionId: string): Promise<ValidateResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/validation-results`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get validation results: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export async function getConnections(sessionId: string, bomId: string): Promise<AnalyzeConnectionsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/connections/${bomId}`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get connections: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
+    id?: string;
+    source_part_number: string;
+    target_part_number: string;
+    connection_type?: string | null;
+    signal_name?: string | null;
+    notes?: string | null;
 }
 
 export interface SubsystemConnection {
-    source_subsystem_id: string;
-    target_subsystem_id: string;
-    connection_types: string[];
-    primary_type: string;
-    part_connection_count: number;
-}
-
-export async function getSubsystemConnections(sessionId: string): Promise<{ success: boolean; subsystem_connections: SubsystemConnection[] }> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystem-connections`);
-    if (!response.ok) throw new Error(`Failed to get subsystem connections: ${response.status}`);
-    return response.json();
-}
-
-export async function saveConnections(
-    sessionId: string,
-    connections: Array<{
-        source_part: string;
-        target_part: string;
-        source_instance_id?: string;
-        target_instance_id?: string;
-        connection_type: string;
-    }>
-): Promise<{ success: boolean; connections_saved: number }> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/connections`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connections }),
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to save connections: ${response.status} ${errorText}`);
-    }
-    return response.json();
-}
-
-export interface Subsystem {
-    id: string;
-    name: string;
-    type: string;
-    componentIds: string[];
-    complianceScore?: number;
-}
-
-// Backend API response format
-export interface BackendSubsystem {
-    subsystem_id: string;
-    original_subsystem_id: string;
-    name: string;
-    description: string;
-    associated_requirements: string[];
-    bom_reference: string[];
-}
-
-export interface SubsystemsResponse {
-    success: boolean;
-    session_id: string;
-    subsystems_count: number;
-    subsystems: BackendSubsystem[];
-}
-
-export async function getSubsystems(sessionId: string): Promise<SubsystemsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get subsystems: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export async function generateSubsystems(sessionId: string): Promise<SubsystemsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to generate subsystems: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export interface SubsystemDetailsResponse {
-    success?: boolean;
-    session_id?: string;
-    subsystem_id: string;
-    name: string;
-    description: string;
-    associated_requirements?: string[];
-    // Enriched parts from /detailed endpoint
-    parts: Array<{
-        part_number: string;
-        manufacturer?: string;
-        quantity: number;
-        component_id?: string;
-        category?: string;
-        classification?: string;
-        specs?: {
-            category?: string;
-            shortDescription?: string;
-            description?: string;
-            datasheet_url?: string;
-            params?: Record<string, any>;
-            [key: string]: any;
-        };
-        enrichment_source?: string;
-        enrichment_confidence?: number;
-        datasheet_url?: string;
-    }>;
-    parts_count: number;
-    connections: Array<{
-        source_part_number: string;
-        target_part_number: string;
-        connection_type: string;
-        is_internal: boolean;
-    }>;
-    connections_count: number;
-    internal_connections_count: number;
-    external_connections_count: number;
-    requirements: Array<{
-        req_id: string;
-        description: string;
-        criteria?: any;
-        priority?: string;
-        mapped_components?: string[];
-    }>;
-    requirements_count: number;
-    // Legacy fields for backwards compatibility
-    component_bom?: Array<{
-        component_id: string;
-        quantity: number;
-    }>;
-    actual_parts_bom?: Array<{
-        part_number: string;
-        quantity: number;
-    }>;
-}
-
-export async function getSubsystemDetails(sessionId: string, subsystemId: string): Promise<SubsystemDetailsResponse> {
-    // Use the /detailed endpoint to get enriched part specs
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}/detailed`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get subsystem details: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
+    source_subsystem: string;
+    target_subsystem: string;
+    interface_type?: string | null;
 }
 
 export interface SubsystemRequirementItem {
-    req_id: string;
+    id: string;
     subsystem_id: string;
-    description: string;
-    criteria: string;
-    priority: string;
-    mapped_components: string[];
+    requirement_text: string;
+    priority?: string | null;
 }
 
-export interface SubsystemRequirementsResponse {
-    success: boolean;
-    session_id: string;
-    subsystem_requirements: Array<{
-        subsystem_id: string;
-        requirements: Requirement[];
-    }>;
-}
-
-export interface SubsystemRequirementsDirectResponse {
-    success: boolean;
-    subsystem_id: string;
-    requirements_count: number;
-    requirements: SubsystemRequirementItem[];
-}
-
-export interface GenerateSubsystemRequirementsResponse {
-    success: boolean;
-    session_id: string;
-    requirements_count: number;
-    requirements_by_subsystem: Record<string, SubsystemRequirementItem[]>;
-    all_requirements: SubsystemRequirementItem[];
-}
-
-export interface SubsystemRequirementsNotFoundResponse {
-    detail: string;
-}
-
-export async function getSubsystemRequirementsBySubsystemId(
-    sessionId: string,
-    subsystemId: string
-): Promise<SubsystemRequirementsResponse | SubsystemRequirementsDirectResponse | SubsystemRequirementsNotFoundResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}/requirements`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get subsystem requirements: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export async function getSubsystemRequirements(sessionId: string): Promise<SubsystemRequirementsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/requirements`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get subsystem requirements: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export async function generateSubsystemRequirements(
-    sessionId: string,
-    subsystemId: string
-): Promise<GenerateSubsystemRequirementsResponse | SubsystemRequirementsDirectResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/${subsystemId}/requirements`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to generate subsystem requirements: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-export interface CreateSubsystemRequirementRequest {
-    subsystem_id: string;
-    description: string;
-    criteria: string;
-    priority: string;
-    mapped_components: string[];
-}
-
-export interface CreateSubsystemRequirementResponse {
-    success: boolean;
-    message?: string;
-    requirement?: SubsystemRequirementItem;
-}
-
-export async function createSubsystemRequirement(
-    sessionId: string,
-    requirement: CreateSubsystemRequirementRequest
-): Promise<CreateSubsystemRequirementResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/subsystems/requirements/create`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requirement),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create subsystem requirement: ${response.status} ${errorText}`);
-    }
-
-    return response.json();
-}
-
-// ── Chat ─────────────────────────────────────────────────────────────────────
-
-export interface ChatResponse {
-    agent: string;
-    mode: string;
-    data: string;
-    state: string;
-    session_id: string;
-    timestamp: string;
-    elapsed_ms: number;
-}
-
-export async function sendChatMessage(sessionId: string, message: string): Promise<ChatResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Chat failed: ${response.status} ${errorText}`);
-    }
-    return response.json();
+export interface Requirement {
+    id: string;
+    requirement_text: string;
+    category?: string | null;
+    priority?: string | null;
+    source?: string | null;
 }
 
 export interface ChatHistoryMessage {
-    id: number;
+    id: string;
     role: 'user' | 'assistant';
     content: string;
-    agent_name?: string;
-    fsm_state?: string;
     created_at: string;
 }
 
-export interface ChatHistoryResponse {
-    session_id: string;
-    messages: ChatHistoryMessage[];
-    count: number;
+// ── Designs (v2 native) ───────────────────────────────────────────────────────
+
+export async function createDesign(projectName: string, userId?: string): Promise<Design> {
+    const body = new FormData();
+    body.append('project_name', projectName);
+    if (userId) body.append('user_id', userId);
+    return apiJSON(`${BASE_URL}/designs`, { method: 'POST', body });
 }
 
-export async function getChatHistory(sessionId: string, limit = 50): Promise<ChatHistoryResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/chat/history?limit=${limit}`);
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get chat history: ${response.status} ${errorText}`);
-    }
-    return response.json();
+export async function listDesigns(): Promise<Design[]> {
+    return apiJSON(`${BASE_URL}/designs`);
 }
 
-export type ChatStreamEvent =
-    | { type: 'token'; content: string }
-    | { type: 'done'; agent: string; state: string }
-    | { type: 'error'; message: string };
+export async function getDesign(designId: string): Promise<Design> {
+    return apiJSON(`${BASE_URL}/designs/${designId}`);
+}
 
-export async function chatStream(
-    sessionId: string,
-    message: string,
-    onEvent: (event: ChatStreamEvent) => void,
-    pageContext?: string,
+export async function uploadBOM(designId: string, file: File): Promise<UploadResponse> {
+    const body = new FormData();
+    body.append('file', file);
+    return apiJSON(`${BASE_URL}/designs/${designId}/bom`, { method: 'POST', body });
+}
+
+export async function getParts(designId: string): Promise<DesignPart[]> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/parts`);
+}
+
+export async function identifyPartsStream(
+    designId: string,
+    onEvent: (event: IdentifyStreamEvent) => void,
+    _setStage?: (stage: number | null) => void,
 ): Promise<void> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/chat/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, page_context: pageContext }),
-    });
-    if (!response.ok || !response.body) {
-        const errorText = await response.text();
-        throw new Error(`Chat stream failed: ${response.status} ${errorText}`);
+    const res = await apiFetch(`${BASE_URL}/designs/${designId}/pipeline/identify/stream`, { method: 'POST' });
+    if (!res.ok || !res.body) {
+        const text = await res.text();
+        throw new Error(`Identify stream failed: ${res.status} ${text}`);
     }
-    const reader = response.body.getReader();
+    const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
-        const parts = buf.split('\n\n');
-        buf = parts.pop() ?? '';
-        for (const part of parts) {
-            const line = part.trim();
-            if (!line.startsWith('data:')) continue;
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
             try {
-                const evt = JSON.parse(line.slice(5).trim()) as ChatStreamEvent;
-                onEvent(evt);
+                const event = JSON.parse(line.slice(6)) as IdentifyStreamEvent;
+                console.log('%c  [SSE]', 'color:#a78bfa', event);
+                onEvent(event);
             } catch { /* skip malformed */ }
         }
     }
 }
 
-// GET version of getRequirements (currently only POST exists)
-export async function getRequirementsGET(sessionId: string): Promise<RequirementsResponse> {
-    const response = await fetch(`${BASE_URL}/sessions/${sessionId}/requirements`, {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-    });
+export async function getEvents(designId: string, limit = 50) {
+    return apiJSON<unknown[]>(`${BASE_URL}/designs/${designId}/events?limit=${limit}`);
+}
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get requirements: ${response.status} ${errorText}`);
+// ── createSession: wraps createDesign for older call sites ───────────────────
+export async function createSession(): Promise<{ session_id: string }> {
+    const design = await createDesign(`Design ${new Date().toISOString().slice(0, 10)}`);
+    return { session_id: design.id };
+}
+
+// ── getBOMBySessionId ─────────────────────────────────────────────────────────
+export async function getBOMBySessionId(sessionId: string): Promise<Design> {
+    return getDesign(sessionId);
+}
+
+// ── getAllBOMs: wraps listDesigns ─────────────────────────────────────────────
+function _fsmToStage(fsm: string): number {
+    const map: Record<string, number> = {
+        empty: 1, bom_uploaded: 1, parts_identified: 2,
+        classified: 3, system_analyzed: 4, validated: 5,
+        connections_built: 6, requirements_generated: 7,
+        subsystems_generated: 8, complete: 10,
+    };
+    return map[fsm] ?? 1;
+}
+
+export async function getAllBOMs(): Promise<{
+    boms: Array<{
+        bom_id: string;
+        system_type: string | null;
+        current_stage: number;
+        total_parts: number;
+        created_at: string;
+    }>;
+}> {
+    const designs = await listDesigns();
+    return {
+        boms: designs.map(d => ({
+            bom_id: d.id,
+            system_type: d.project_name,
+            current_stage: _fsmToStage(d.fsm_state),
+            total_parts: 0,
+            created_at: d.created_at,
+        })),
+    };
+}
+
+// ── getCurrentStage ───────────────────────────────────────────────────────────
+export async function getCurrentStage(sessionId: string): Promise<{ current_stage: number }> {
+    const design = await getDesign(sessionId);
+    return { current_stage: _fsmToStage(design.fsm_state) };
+}
+
+export function updateCurrentStageInContext(_sessionId: string): void {
+    console.warn('[api] updateCurrentStageInContext: no-op in v2');
+}
+
+// ── Phase 4 — Classify ────────────────────────────────────────────────────────
+
+export async function classifyParts(designId: string): Promise<{ classification_map: Record<string, string | null> }> {
+    await apiJSON(`${BASE_URL}/designs/${designId}/pipeline/classify`, { method: 'POST' });
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        const result = await getClassification(designId);
+        if (Object.values(result.classification_map).some(v => v !== null)) {
+            return { classification_map: result.classification_map };
+        }
     }
+    return { classification_map: (await getClassification(designId)).classification_map };
+}
 
-    return response.json();
+export async function classifyPartsStream(
+    designId: string,
+    onEvent: (event: Record<string, unknown>) => void,
+    options?: { contextHint?: string },
+): Promise<void> {
+    const url = new URL(`${BASE_URL}/designs/${designId}/classification/stream`);
+    if (options?.contextHint?.trim()) url.searchParams.set('context_hint', options.contextHint.trim());
+    const res = await apiFetch(url.toString());
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
+                try { onEvent(JSON.parse(line.slice(6))); } catch { /* skip */ }
+            }
+        }
+    }
+}
+
+export async function getClassification(designId: string): Promise<{
+    parts: PartDetail[];
+    classification_map: Record<string, string | null>;
+}> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/classification`);
+}
+
+export async function bulkUpdateClassification(
+    designId: string,
+    updates: { mpn: string; new_classification: string }[],
+    _setStage?: (stage: number | null) => void,
+): Promise<void> {
+    await apiJSON(`${BASE_URL}/designs/${designId}/classification/bulk`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+    });
+}
+
+export async function selectPartMatch(
+    designId: string,
+    mpn: string,
+    candidate: PartCandidate,
+): Promise<void> {
+    await apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/select-match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(candidate),
+    });
+}
+
+export async function confirmWebPart(
+    designId: string,
+    mpn: string,
+    product_url: string | null,
+    datasheet_url: string | null,
+    description: string | null,
+    _extra?: unknown,
+): Promise<void> {
+    await apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/web-confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            selected_mpn: mpn,
+            product_url,
+            datasheet_url,
+            description,
+        }),
+    });
+}
+
+export async function saveCustomPart(
+    designId: string,
+    mpn: string,
+    fields: {
+        manufacturer?: string;
+        description?: string;
+        category?: string;
+        datasheet_url?: string;
+        specs?: Record<string, string>;
+        datasheetFile?: File;
+    },
+): Promise<void> {
+    const body = new FormData();
+    if (fields.description) body.append('description', fields.description);
+    if (fields.manufacturer) body.append('manufacturer', fields.manufacturer);
+    if (fields.category) body.append('category', fields.category);
+    if (fields.datasheet_url) body.append('datasheet_url', fields.datasheet_url);
+    if (fields.specs) body.append('params', JSON.stringify(fields.specs));
+    if (fields.datasheetFile) body.append('datasheet_file', fields.datasheetFile);
+    await apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/custom`, {
+        method: 'POST',
+        body,
+    });
+}
+
+export async function renamePart(designId: string, mpn: string, newMpn: string): Promise<void> {
+    await apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_mpn: newMpn }),
+    });
+}
+
+export async function suggestPartFields(
+    designId: string,
+    mpn: string,
+    description: string | null,
+    category: string | null,
+): Promise<string[]> {
+    const result = await apiJSON<{ fields: string[] }>(
+        `${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/suggest-fields`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description, category }),
+        },
+    );
+    return result.fields;
+}
+
+// ── Phase 5 — System Analysis ─────────────────────────────────────────────────
+
+export async function analyzeSystem(designId: string, additionalContext?: string): Promise<{ suggestions: SystemSuggestion[] }> {
+    await apiJSON(`${BASE_URL}/designs/${designId}/pipeline/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ additional_context: additionalContext ?? null }),
+    });
+    return { suggestions: [] };
+}
+
+export async function getSystemAnalysis(designId: string): Promise<{
+    success: boolean;
+    suggestions: SystemSuggestion[];
+    system_type: string | null;
+    standards: string[];
+    confirmed: boolean;
+    error?: string | null;
+}> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/system-profile`);
+}
+
+
+export async function selectSystemType(designId: string, index: number): Promise<void> {
+    await apiJSON(`${BASE_URL}/designs/${designId}/system-profile/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index }),
+    });
+}
+
+export async function confirmSystemType(designId: string, index: number): Promise<void> {
+    return selectSystemType(designId, index);
+}
+
+// ── Stubs: Phase 6 — Validation + Connections ─────────────────────────────────
+
+export async function validateParts(_designId: string) {
+    console.warn('[api] validateParts: Phase 6 not yet implemented');
+    return { validation_results: [] as ValidationResult[] };
+}
+
+export async function getValidationResults(_designId: string) {
+    console.warn('[api] getValidationResults: Phase 6 not yet implemented');
+    return { results: [] as ValidationResult[] };
+}
+
+export async function startEnrichFundamentals(_designId: string) {
+    console.warn('[api] startEnrichFundamentals: Phase 6 not yet implemented');
+    return {};
+}
+
+export async function getEnrichmentStatus(_designId: string) {
+    console.warn('[api] getEnrichmentStatus: Phase 6 not yet implemented');
+    return { status: 'idle' };
+}
+
+export async function buildConnections(_designId: string) {
+    console.warn('[api] buildConnections: Phase 6 not yet implemented');
+    return { connections: [] as Connection[] };
+}
+
+export async function analyzeConnections(_designId: string) {
+    console.warn('[api] analyzeConnections: Phase 6 not yet implemented');
+    return { connections: [] as Connection[] };
+}
+
+export async function getConnections(_designId: string): Promise<Connection[]> {
+    console.warn('[api] getConnections: Phase 6 not yet implemented');
+    return [];
+}
+
+export async function saveConnections(_designId: string, _connections: Connection[]) {
+    console.warn('[api] saveConnections: Phase 6 not yet implemented');
+    return {};
+}
+
+export async function getPartSpecs(_designId: string, _mpn: string) {
+    console.warn('[api] getPartSpecs: Phase 6 not yet implemented');
+    return { specs: {} };
+}
+
+// ── Stubs: Phase 7 — Requirements + Subsystems ───────────────────────────────
+
+export async function generateRequirements(_designId: string) {
+    console.warn('[api] generateRequirements: Phase 7 not yet implemented');
+    return { requirements: [] as Requirement[] };
+}
+
+export async function getRequirements(_designId: string): Promise<Requirement[]> {
+    console.warn('[api] getRequirements: Phase 7 not yet implemented');
+    return [];
+}
+
+export async function getRequirementsGET(_designId: string): Promise<Requirement[]> {
+    console.warn('[api] getRequirementsGET: Phase 7 not yet implemented');
+    return [];
+}
+
+export async function updateRequirement(_designId: string, _reqId: string, _data: Partial<Requirement>) {
+    console.warn('[api] updateRequirement: Phase 7 not yet implemented');
+    return {};
+}
+
+export async function deleteRequirement(_designId: string, _reqId: string) {
+    console.warn('[api] deleteRequirement: Phase 7 not yet implemented');
+    return {};
+}
+
+export async function generateSubsystems(_designId: string) {
+    console.warn('[api] generateSubsystems: Phase 7 not yet implemented');
+    return { subsystems: [] };
+}
+
+export async function getSubsystems(_designId: string) {
+    console.warn('[api] getSubsystems: Phase 7 not yet implemented');
+    return [];
+}
+
+export async function getSubsystemDetails(_designId: string, _subsystemId: string) {
+    console.warn('[api] getSubsystemDetails: Phase 7 not yet implemented');
+    return null;
+}
+
+export async function getSubsystemRequirementsBySubsystemId(
+    _designId: string,
+    _subsystemId: string,
+): Promise<SubsystemRequirementItem[]> {
+    console.warn('[api] getSubsystemRequirementsBySubsystemId: Phase 7 not yet implemented');
+    return [];
+}
+
+export async function generateSubsystemRequirements(_designId: string, _subsystemId: string) {
+    console.warn('[api] generateSubsystemRequirements: Phase 7 not yet implemented');
+    return { requirements: [] as SubsystemRequirementItem[] };
+}
+
+export async function createSubsystemRequirement(
+    _designId: string,
+    _subsystemId: string,
+    _data: Partial<SubsystemRequirementItem>,
+): Promise<SubsystemRequirementItem> {
+    console.warn('[api] createSubsystemRequirement: Phase 7 not yet implemented');
+    return { id: '', subsystem_id: _subsystemId, requirement_text: '' };
+}
+
+// ── Stubs: Chat ───────────────────────────────────────────────────────────────
+
+export async function sendChatMessage(designId: string, message: string): Promise<{ data: string }> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/pipeline/analyze/refine`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+    });
+}
+
+export async function chatStream(
+    _designId: string,
+    _message: string,
+    _onToken: (token: string) => void,
+): Promise<void> {
+    console.warn('[api] chatStream: Chat not yet implemented');
+}
+
+export async function getChatHistory(_designId: string): Promise<ChatHistoryMessage[]> {
+    console.warn('[api] getChatHistory: Chat not yet implemented');
+    return [];
+}
+
+// ── Part Model ────────────────────────────────────────────────────────────────
+
+export interface PartModelResponse {
+    mpn: string;
+    model: import('@/app/types').PartModelData;
+    extracted_at: string;
+}
+
+export interface PartPinoutResponse {
+    mpn: string;
+    package: string | null;
+    pin_count: number;
+    pins: import('@/app/types').PartPin[];
+    confidence: number;
+}
+
+export interface ModelExtractionResponse {
+    mpn: string;
+    status: 'already_extracted' | 'extraction_started';
+    model?: import('@/app/types').PartModelData;
+    extracted_at?: string;
+}
+
+export async function getPartModel(designId: string, mpn: string): Promise<PartModelResponse> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/model`);
+}
+
+export async function getPartPinout(designId: string, mpn: string): Promise<PartPinoutResponse> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/pinout`);
+}
+
+export async function triggerModelExtraction(designId: string, mpn: string): Promise<ModelExtractionResponse> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/model/extract`, { method: 'POST' });
+}
+
+// ── Model enrichment stage ────────────────────────────────────────────────────
+
+export interface ModelEnrichmentTriggerResponse {
+    status: 'enrichment_started' | 'nothing_to_enrich';
+    total: number;
+}
+
+export type PartEnrichmentState = 'done' | 'extracting' | 'no_datasheet';
+
+export interface PartEnrichmentDetail {
+    mpn: string;
+    status: PartEnrichmentState;
+}
+
+export interface ModelEnrichmentStatus {
+    total: number;
+    done: number;
+    extracting: number;
+    no_datasheet: number;
+    complete: boolean;
+    parts: PartEnrichmentDetail[];
+}
+
+export async function triggerModelEnrichment(designId: string): Promise<ModelEnrichmentTriggerResponse> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/pipeline/enrich`, { method: 'POST' });
+}
+
+export async function getModelEnrichmentStatus(designId: string): Promise<ModelEnrichmentStatus> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/enrichment/status`);
+}
+
+export async function updatePartDatasheetUrl(
+    designId: string,
+    mpn: string,
+    url: string,
+): Promise<{ status: string; mpn: string }> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/datasheet-url`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+    });
 }

@@ -1,0 +1,58 @@
+import { useState, useCallback } from 'react';
+const API_BASE = 'http://localhost:8090/api';
+
+export interface AgentHistoryMessage {
+  role: 'user' | 'model';
+  content: string;
+}
+
+export interface AgentResponse {
+  type: 'message' | 'tool_result';
+  message: string;
+  tool_called: string | null;
+  data: unknown;
+}
+
+interface UseAgentOptions {
+  onToolResult?: (tool: string, data: unknown) => void;
+}
+
+export function useAgent(designId: string, stage: string, options: UseAgentOptions = {}) {
+  const [history, setHistory] = useState<AgentHistoryMessage[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const send = useCallback(async (message: string): Promise<AgentResponse> => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/designs/${designId}/agent/${stage}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, history }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail ?? 'Agent request failed');
+      }
+      const response: AgentResponse = await res.json();
+
+      // Append both turns to history for next call
+      setHistory(prev => [
+        ...prev,
+        { role: 'user', content: message },
+        { role: 'model', content: response.message },
+      ]);
+
+      if (response.type === 'tool_result' && response.tool_called) {
+        options.onToolResult?.(response.tool_called, response.data);
+      }
+
+      return response;
+    } finally {
+      setLoading(false);
+    }
+  }, [designId, stage, history, options.onToolResult]);
+
+  const reset = useCallback(() => setHistory([]), []);
+
+  return { send, loading, history, reset };
+}
