@@ -219,6 +219,10 @@ export function EnrichmentView() {
   const [reIdentifyingMpns, setReIdentifyingMpns] = useState<Set<string>>(new Set());
   const [confirmingOverwriteMpns, setConfirmingOverwriteMpns] = useState<Set<string>>(new Set());
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // After a user-triggered re-identify or URL submit, keep polling for at least
+  // this many more intervals even if the server says complete=true, because the
+  // background task may not have written its result to the DB yet.
+  const guaranteedPollsRef = useRef(0);
 
   // Tracks when each MPN was first seen in "extracting" state.
   // Stored in a ref to avoid triggering re-renders on update.
@@ -263,7 +267,13 @@ export function EnrichmentView() {
       try {
         const s = await getModelEnrichmentStatus(sessionId);
         setStatus(s);
-        if (s.complete) stopPolling();
+        if (s.complete) {
+          if (guaranteedPollsRef.current > 0) {
+            guaranteedPollsRef.current -= 1;
+          } else {
+            stopPolling();
+          }
+        }
       } catch {
         setError('Failed to fetch enrichment status.');
         stopPolling();
@@ -298,12 +308,22 @@ export function EnrichmentView() {
   };
 
   const ensurePolling = () => {
-    if (pollingRef.current || !sessionId) return;
+    if (!sessionId) return;
+    // Guarantee at least 30 more polls (~2 min) so background tasks have time
+    // to write their result even if the server transiently says complete=true.
+    guaranteedPollsRef.current = Math.max(guaranteedPollsRef.current, 30);
+    if (pollingRef.current) return;
     const fetchStatus = async () => {
       try {
         const s = await getModelEnrichmentStatus(sessionId);
         setStatus(s);
-        if (s.complete) stopPolling();
+        if (s.complete) {
+          if (guaranteedPollsRef.current > 0) {
+            guaranteedPollsRef.current -= 1;
+          } else {
+            stopPolling();
+          }
+        }
       } catch {
         stopPolling();
       }
