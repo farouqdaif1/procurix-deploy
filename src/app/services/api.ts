@@ -639,19 +639,21 @@ export interface ModelEnrichmentTriggerResponse {
     total: number;
 }
 
-export type PartEnrichmentState = 'done' | 'extracting' | 'no_datasheet';
+export type PartEnrichmentState = 'done' | 'extracting' | 'no_datasheet' | 'failed';
 
 export interface PartEnrichmentDetail {
     mpn: string;
     status: PartEnrichmentState;
     has_model: boolean;
     source: string | null;
+    failure_reason: string | null;
 }
 
 export interface ModelEnrichmentStatus {
     total: number;
     done: number;
     extracting: number;
+    failed: number;
     no_datasheet: number;
     complete: boolean;
     parts: PartEnrichmentDetail[];

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useReducer } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle, Loader2, Database, AlertCircle,
-  ArrowRight, Cpu, AlertTriangle, Link, RefreshCw,
+  ArrowRight, Cpu, AlertTriangle, Link, RefreshCw, XCircle,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
@@ -60,6 +60,7 @@ function PartCard({
     done: 'border-green-200 bg-green-50',
     extracting: isStuck ? 'border-orange-200 bg-orange-50' : 'border-blue-100 bg-white',
     no_datasheet: 'border-amber-200 bg-amber-50',
+    failed: 'border-red-200 bg-red-50',
   };
 
   return (
@@ -79,6 +80,9 @@ function PartCard({
           {part.status === 'no_datasheet' && (
             <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
           )}
+          {part.status === 'failed' && (
+            <XCircle className="h-5 w-5 text-red-500 shrink-0" />
+          )}
 
           <div className="flex flex-col min-w-0">
             <span className="font-mono text-sm font-medium text-gray-800">{part.mpn}</span>
@@ -93,6 +97,17 @@ function PartCard({
 
             {part.status === 'no_datasheet' && (
               <span className="text-xs text-amber-600 mt-0.5">No datasheet — add a PDF URL to extract</span>
+            )}
+
+            {part.status === 'failed' && part.failure_reason && (
+              <span
+                className="text-xs text-red-600 mt-0.5 break-all"
+                title={part.failure_reason}
+              >
+                {part.failure_reason.length > 120
+                  ? `${part.failure_reason.slice(0, 120)}…`
+                  : part.failure_reason}
+              </span>
             )}
           </div>
         </div>
@@ -116,6 +131,15 @@ function PartCard({
               {isEditing ? 'Cancel' : 'Add URL'}
             </button>
           )}
+          {part.status === 'failed' && (
+            <button
+              onClick={onToggleEdit}
+              className="flex items-center gap-1 text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2 py-1 hover:bg-red-100 transition-colors"
+            >
+              <Link className="h-3 w-3" />
+              {isEditing ? 'Cancel' : 'Retry with URL'}
+            </button>
+          )}
           {part.source && part.status !== 'extracting' && (
             <button
               onClick={onReIdentify}
@@ -130,8 +154,8 @@ function PartCard({
         </div>
       </div>
 
-      {/* Inline URL input for no_datasheet */}
-      {part.status === 'no_datasheet' && isEditing && (
+      {/* Inline URL input for no_datasheet or failed */}
+      {(part.status === 'no_datasheet' || part.status === 'failed') && isEditing && (
         <div className="mt-3 flex items-center gap-2">
           <input
             type="url"
@@ -328,13 +352,18 @@ export function EnrichmentView() {
       await updatePartDatasheetUrl(sessionId, mpn, url);
       setStatus(prev => {
         if (!prev) return prev;
+        const prevPart = prev.parts.find(p => p.mpn === mpn);
+        const wasFailed = prevPart?.status === 'failed';
         return {
           ...prev,
           extracting: prev.extracting + 1,
-          no_datasheet: prev.no_datasheet - 1,
+          no_datasheet: wasFailed ? prev.no_datasheet : prev.no_datasheet - 1,
+          failed: wasFailed ? (prev.failed ?? 1) - 1 : prev.failed ?? 0,
           complete: false,
           parts: prev.parts.map(p =>
-            p.mpn === mpn ? { ...p, status: 'extracting' as PartEnrichmentState } : p
+            p.mpn === mpn
+              ? { ...p, status: 'extracting' as PartEnrichmentState, failure_reason: null }
+              : p
           ),
         };
       });
@@ -373,10 +402,13 @@ export function EnrichmentView() {
     );
   }
 
+  // Progress excludes failed parts (they're terminal, not in-flight).
   const enrichable = status.done + status.extracting;
   const progressPct = enrichable > 0
     ? Math.round((status.done / enrichable) * 100)
     : 100;
+
+  const failedCount = status.failed ?? 0;
 
   const stuckCount = status.parts.filter(p => {
     const t = firstSeenExtractingAt.current[p.mpn];
@@ -428,6 +460,17 @@ export function EnrichmentView() {
           <span>
             {stuckCount} part{stuckCount > 1 ? 's have' : ' has'} been extracting for over 10 minutes.
             The Temporal worker may be down or overloaded — check worker logs.
+          </span>
+        </div>
+      )}
+
+      {/* Failed extraction banner */}
+      {failedCount > 0 && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            {failedCount} part{failedCount > 1 ? 's' : ''} failed extraction — see reasons below.
+            You can supply a different PDF URL to retry, or continue without these parts.
           </span>
         </div>
       )}
