@@ -19,6 +19,7 @@ import {
   ArrowRight,
   Upload,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -30,6 +31,7 @@ import {
   saveCustomPart,
   renamePart,
   suggestPartFields,
+  nexarRefreshPart,
 } from '@/app/services/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -79,13 +81,15 @@ function srcBadge(source: string | undefined | null) {
     nexar: 'bg-blue-50 text-blue-600 border-blue-200',
     nexar_confirmed: 'bg-green-50 text-green-600 border-green-200',
     cache: 'bg-gray-50 text-gray-500 border-gray-200',
+    cache_hit: 'bg-gray-50 text-gray-500 border-gray-200',
     web: 'bg-purple-50 text-purple-600 border-purple-200',
     web_broad: 'bg-orange-50 text-orange-600 border-orange-200',
     web_confirmed: 'bg-teal-50 text-teal-600 border-teal-200',
     user_provided: 'bg-green-50 text-green-700 border-green-300',
   };
   const label: Record<string, string> = {
-    nexar: 'nexar', nexar_confirmed: 'confirmed', cache: 'cached',
+    nexar: 'nexar', nexar_confirmed: 'confirmed',
+    cache: 'cached', cache_hit: 'cached',
     web: 'web', web_broad: 'ai search', web_confirmed: 'web ✓', user_provided: 'manual',
   };
   const cls = styles[source] ?? styles.cache;
@@ -371,6 +375,37 @@ function ReviewPhase({
   );
 
   const [saving, setSaving] = useState(false);
+  const [refreshingMpns, setRefreshingMpns] = useState<Set<string>>(new Set());
+  const [refreshedParts, setRefreshedParts] = useState<Record<string, Partial<IdentifiedPart>>>({});
+
+  const handleNexarRefresh = async (mpn: string) => {
+    if (!sessionId) return;
+    setRefreshingMpns(prev => new Set(prev).add(mpn));
+    try {
+      const updated = await nexarRefreshPart(sessionId, mpn);
+      setRefreshedParts(prev => ({
+        ...prev,
+        [mpn]: {
+          category: updated.category ?? undefined,
+          description: updated.description ?? undefined,
+          datasheet_url: updated.datasheet_url ?? undefined,
+          source: updated.source,
+          params: updated.params ?? undefined,
+        },
+      }));
+      // Clear any manual candidate override — fresh Nexar data supersedes it
+      setIdentifiedOverrides(prev => { const n = { ...prev }; delete n[mpn]; return n; });
+      if (updated.datasheet_url) {
+        toast.success(`${mpn} refreshed — datasheet URL obtained`);
+      } else {
+        toast.info(`${mpn} refreshed from Nexar — no datasheet URL found, supply one at enrichment`);
+      }
+    } catch {
+      toast.error(`Nexar lookup failed for ${mpn} — no update made`);
+    } finally {
+      setRefreshingMpns(prev => { const n = new Set(prev); n.delete(mpn); return n; });
+    }
+  };
 
   const webFound = needsAction.filter(a => a.status === 'web_found');
   const notFound = needsAction.filter(a => a.status === 'not_found');
@@ -486,6 +521,8 @@ function ReviewPhase({
                 const isOpen = expandedId === p.mpn;
                 const selectedIdx = identifiedOverrides[p.mpn] ?? 0;
                 const hasAlts = (p.candidates?.length ?? 0) > 1;
+                // Merge any in-session Nexar refresh over the original stream data
+                const ep = { ...p, ...(refreshedParts[p.mpn] ?? {}) };
 
                 return (
                   <div
@@ -494,61 +531,65 @@ function ReviewPhase({
                       isOpen ? 'border-blue-300' : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    {/* Summary row */}
-                    <button
-                      onClick={() => setExpandedId(isOpen ? null : p.mpn)}
-                      className="w-full text-left px-4 py-3 flex items-center gap-3"
-                    >
-                      <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                      <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                        <span className="font-mono font-semibold text-gray-900 text-sm">{p.mpn}</span>
-                        {srcBadge(identifiedOverrides[p.mpn] !== undefined
-                          ? (p.candidates?.[identifiedOverrides[p.mpn]]?.mpn ? 'nexar_confirmed' : p.source)
-                          : p.source)}
-                        {p.category && (
-                          <span className="text-xs text-gray-500">{p.category}</span>
-                        )}
-                        {p.description && p.description !== p.mpn && (
-                          <span className="text-xs text-gray-400 truncate max-w-xs">{p.description}</span>
-                        )}
-                      </div>
-                      <div className="shrink-0 flex items-center gap-2">
-                        {hasAlts && (
-                          <span className="text-[10px] text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
-                            {p.candidates!.length} options
-                          </span>
-                        )}
-                        {identifiedOverrides[p.mpn] !== undefined && (
-                          <span className="text-[10px] text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-full">
-                            changed
-                          </span>
-                        )}
-                        {isOpen
-                          ? <ChevronDown className="h-4 w-4 text-gray-400" />
-                          : <ChevronRight className="h-4 w-4 text-gray-400" />
-                        }
-                      </div>
-                    </button>
+                    {/* Summary row: expand toggle + optional Re-identify (siblings, not nested) */}
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => setExpandedId(isOpen ? null : p.mpn)}
+                        className="flex-1 text-left px-4 py-3 flex items-center gap-3 min-w-0"
+                      >
+                        <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                        <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-semibold text-gray-900 text-sm">{ep.mpn}</span>
+                          {srcBadge(identifiedOverrides[p.mpn] !== undefined
+                            ? (p.candidates?.[identifiedOverrides[p.mpn]]?.mpn ? 'nexar_confirmed' : ep.source)
+                            : ep.source)}
+                          {ep.category && (
+                            <span className="text-xs text-gray-500">{ep.category}</span>
+                          )}
+                          {ep.description && ep.description !== ep.mpn && (
+                            <span className="text-xs text-gray-400 truncate max-w-xs">{ep.description}</span>
+                          )}
+                        </div>
+                        <div className="shrink-0 flex items-center gap-2">
+                          {hasAlts && (
+                            <span className="text-[10px] text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                              {p.candidates!.length} options
+                            </span>
+                          )}
+                          {identifiedOverrides[p.mpn] !== undefined && (
+                            <span className="text-[10px] text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-full">
+                              changed
+                            </span>
+                          )}
+                          {isOpen
+                            ? <ChevronDown className="h-4 w-4 text-gray-400" />
+                            : <ChevronRight className="h-4 w-4 text-gray-400" />
+                          }
+                        </div>
+                      </button>
+                      {ep.source === 'cache_hit' && (
+                        <div className="pr-3 shrink-0">
+                          <button
+                            onClick={() => void handleNexarRefresh(ep.mpn)}
+                            disabled={refreshingMpns.has(ep.mpn)}
+                            title="Re-fetch fresh data from Nexar"
+                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                          >
+                            <RefreshCw className={`h-3 w-3 ${refreshingMpns.has(ep.mpn) ? 'animate-spin' : ''}`} />
+                            Re-identify
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Expanded: show specs + candidates to pick */}
                     {isOpen && (
                       <div className="px-4 pb-4 pt-1 border-t border-gray-100">
-                        {(p.datasheet_url || p.product_url) && (
-                          <a
-                            href={(p.datasheet_url || p.product_url)!}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 mb-3"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                            {p.datasheet_url ? 'View datasheet' : 'View product page'}
-                          </a>
-                        )}
-                        {p.params && Object.values(p.params).some(Boolean) && (
+                        {ep.params && Object.values(ep.params).some(Boolean) && (
                           <div className="mb-3">
                             <div className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold mb-1.5">Technical Specifications</div>
                             <div className="grid grid-cols-2 gap-1">
-                              {Object.entries(p.params).filter(([, v]) => v).map(([key, spec]) => (
+                              {Object.entries(ep.params).filter(([, v]) => v).map(([key, spec]) => (
                                 <div key={key} className="flex items-center justify-between bg-gray-50 rounded px-2 py-1">
                                   <span className="text-[11px] text-gray-500 truncate mr-2">{key}</span>
                                   <span className="text-[11px] font-semibold text-gray-800 shrink-0">
@@ -615,18 +656,18 @@ function ReviewPhase({
                           </div>
                         ) : (
                           <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-                            {p.datasheet_url ? (
-                              <a href={p.datasheet_url} target="_blank" rel="noopener noreferrer"
+                            {ep.datasheet_url ? (
+                              <a href={ep.datasheet_url} target="_blank" rel="noopener noreferrer"
                                 className="text-blue-500 hover:underline flex items-center gap-0.5">
                                 <ExternalLink className="h-3 w-3" /> View datasheet
                               </a>
-                            ) : p.product_url ? (
-                              <a href={p.product_url} target="_blank" rel="noopener noreferrer"
+                            ) : ep.product_url ? (
+                              <a href={ep.product_url} target="_blank" rel="noopener noreferrer"
                                 className="text-blue-500 hover:underline flex items-center gap-0.5">
                                 <ExternalLink className="h-3 w-3" /> View product page
                               </a>
                             ) : (
-                              <span>Identified via {p.source ?? 'catalog'}</span>
+                              <span>Identified via {ep.source ?? 'catalog'}</span>
                             )}
                           </div>
                         )}

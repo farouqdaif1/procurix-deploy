@@ -644,6 +644,8 @@ export type PartEnrichmentState = 'done' | 'extracting' | 'no_datasheet';
 export interface PartEnrichmentDetail {
     mpn: string;
     status: PartEnrichmentState;
+    has_model: boolean;
+    source: string | null;
 }
 
 export interface ModelEnrichmentStatus {
@@ -672,5 +674,33 @@ export async function updatePartDatasheetUrl(
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
+    });
+}
+
+export async function reIdentifyPart(
+    designId: string,
+    mpn: string,
+): Promise<{ status: string; mpn: string }> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/re-identify`, {
+        method: 'POST',
+    });
+}
+
+export interface NexarRefreshResult {
+    mpn: string;
+    manufacturer: string | null;
+    category: string | null;
+    description: string | null;
+    datasheet_url: string | null;
+    source: string;
+    params: Record<string, string> | null;
+}
+
+export async function nexarRefreshPart(
+    designId: string,
+    mpn: string,
+): Promise<NexarRefreshResult> {
+    return apiJSON(`${BASE_URL}/designs/${designId}/parts/${encodeURIComponent(mpn)}/nexar-refresh`, {
+        method: 'POST',
     });
 }
