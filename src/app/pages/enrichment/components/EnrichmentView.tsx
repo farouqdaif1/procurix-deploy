@@ -140,15 +140,19 @@ function PartCard({
               {isEditing ? 'Cancel' : 'Retry with URL'}
             </button>
           )}
-          {part.source && part.status !== 'extracting' && (
+          {part.source && (
             <button
               onClick={onReIdentify}
               disabled={isReIdentifying}
-              title="Re-fetch from Nexar and re-extract model"
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              title={isStuck ? 'Stuck — force re-fetch from Nexar' : 'Re-fetch from Nexar and re-extract model'}
+              className={`flex items-center gap-1 text-xs border rounded px-2 py-1 disabled:opacity-40 transition-colors ${
+                isStuck
+                  ? 'text-orange-600 hover:text-orange-800 border-orange-300 hover:bg-orange-50'
+                  : 'text-gray-500 hover:text-gray-700 border-gray-200 hover:bg-gray-50'
+              }`}
             >
               <RefreshCw className={`h-3 w-3 ${isReIdentifying ? 'animate-spin' : ''}`} />
-              Re-identify
+              {isStuck ? 'Force re-identify' : 'Re-identify'}
             </button>
           )}
         </div>
